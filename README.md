@@ -1,0 +1,178 @@
+# Elevance People
+
+In-house HR / people management for Elevance Labs. React + Vite front end, Supabase back end, deployed to GitHub Pages.
+
+Modules so far: **Home** (dashboard with announcements, leave summary and upcoming holidays, the employee handbook, resources (work ethics, and guides for your business function), and a profile showing your own record), **Employee records** (with documents), **Org chart**, **Appraisals** (salary history), **Performance** (monthly 1:1 reviews against KPIs, expectations and a quarterly goal, feedback from HR, and quarterly peer reviews), **Leaves** (with public holidays), **Hiring** (job openings with a public application page, and an applications board), **Human Resources** (onboarding and offboarding), **Finance** (payroll), **Operations** (equipment and who has it), **Company settings** (departments, designations, KPIs, expectations, leaves, holidays, announcements, branding), and **Configuration** (the onboarding and offboarding checklists, vendors).
+
+## Access model
+
+| Role | Can do |
+| --- | --- |
+| Member (default) | See the dashboard (pinned announcements, and the last 4 months' announcements in a side panel; their leave balance and upcoming leave, upcoming holidays), the handbook and Resources (the work ethics, and the guides for their own department's business function only). View the org chart. Read their own employee record on the Profile page, without editing it, and their salary and its history, and see and download their payslips once a month's payroll is processed, and the equipment assigned to them. Apply for leave, see their balance and track their requests, and see the year's holidays. Read their own monthly reviews once submitted, and feedback HR sends them, and acknowledge both; see their performance over time, and what colleagues wrote about them in peer reviews, without names. Write the peer reviews HR asks them for. If they manage people in the org chart: see and approve or reject their direct reports' leave, and write and submit their direct reports' monthly reviews, and keep a private note about each of them for their 1:1s; see their direct reports' offboardings, tick their tasks off and sign off as manager. If they're a job's hiring manager or interviewer: see that job's applications from Shortlisted to Cleared, with their CVs, and move them on from Shortlisted, Test and the interviews. Only the hiring manager also sees the expected salary. |
+| HR Admin | Everything a member can, plus add/edit employees (but not change a company email once the record exists, since it is the login), upload and delete documents, edit the org chart. Set up leave types and quotas, and the public holidays, see everyone's leave, record a leave for someone, approve or reject as HR, change a leave's dates, cancel any leave. Create, edit and delete job openings. See every application, with expected salary, and move it to any allowed stage; undo the last move. Hire an applicant, which creates their employee record and onboarding. Write appraisals (salary revisions) for anyone but themselves and send them for review. Work through onboardings: tick tasks off, then complete or cancel them. Work through offboardings (started when someone is put on notice): set the reason and last working day, tick tasks off, sign off as HR, or cancel them. Not their own. Write, pin and delete announcements. See every monthly review (but drafts of their own) and who is due one. Send feedback to any employee but themselves, and delete it. Set up each quarter's peer reviews (questions, who reviews whom), open and close them, and read every response with the reviewer's name, except about themselves. Work on payroll: start a month's payroll, add and remove people, set basic salary, contractual amount, absent days and HR remarks, send it for review, download it as CSV. Add, edit and delete equipment, assign and unassign it; add and edit vendors. |
+| Finance Admin | Everything a member can, plus payroll: start a month's payroll, add and remove people, set bonus, absent deduction, allowance, arrears, advance, loan deduction, tax and finance remarks, send it for review, mark an approved payroll processed, download it as CSV. Equipment and vendors, as HR. Not HR: no employee records or HR pages. |
+| Company Admin | Everything HR can, plus delete employees, assign roles, change company emails, and manage departments (each with its business function), designations, KPIs, expectations and branding (the *Company* section; HR admins see only its *Leaves*, *Holidays* and *Announcements* pages), and the onboarding and offboarding checklists (*Configuration*), approve or reject appraisals (not their own), and delete vendors. On payroll they edit every column, approve a payroll in review, send one in review or approved back to draft, and can mark it processed. |
+| Anyone (not signed in) | View an open job's public page and apply to it. Nothing else. |
+
+Sign-in is Google only (the public job pages need none). A user gets in only if their Google email is `@elevancelabs.com` **and** an employee record with that company email exists with status Probation, Active or Notice period. All of this is enforced in the database (row level security), not just in the UI.
+
+## Set up Supabase (once)
+
+1. **Create a project** at supabase.com.
+2. **Apply the schema.** With the Supabase CLI (recommended, as it records which migrations have run):
+   ```sh
+   supabase link --project-ref <project-ref>
+   supabase db push
+   ```
+   Or paste [`supabase/schema.sql`](supabase/schema.sql) into the SQL editor and run it once. It builds the same database in one go. Pick one way: `schema.sql` doesn't record migration history, so a later `db push` on that project would try to replay every migration.
+3. **Create the first company admin.** Nobody can log in until one employee exists, so add yourself in the SQL editor:
+   ```sql
+   insert into public.employees (full_name, company_email, date_of_joining, status, app_role)
+   values ('Your Name', 'you@elevancelabs.com', '2024-01-01', 'active', 'company_admin');
+   ```
+4. **Enable Google sign-in.** In Google Cloud Console create an OAuth client (type: Web application; for a Workspace org choose user type *Internal*) with the authorised redirect URI `https://<project-ref>.supabase.co/auth/v1/callback`. Put the client ID and secret into Supabase → Authentication → Sign In / Providers → Google.
+5. **Turn off other sign-in methods.** In the same screen disable the Email provider.
+6. **Set the URLs.** Authentication → URL Configuration: set *Site URL* to the GitHub Pages URL (e.g. `https://<org>.github.io/<repo>/`) and add `http://localhost:5173/` to *Redirect URLs*.
+7. **Recommended:** Authentication → Hooks → *Before User Created* → Postgres function `public.hook_before_user_created`. This rejects people without an employee record before an auth user is even created. The app is secure without it; it just keeps the user list clean.
+
+## Run locally
+
+```sh
+cp .env.example .env   # fill in the project URL and anon/publishable key
+yarn install
+yarn dev
+```
+
+The project uses **yarn** (v1); `yarn.lock` is the lockfile. Don't use `npm install`, which would add a `package-lock.json`.
+
+## Checks
+
+| Command | What it does |
+| --- | --- |
+| `yarn lint` | [oxlint](https://oxc.rs) over the app and tests. Warnings count as failures. |
+| `yarn typecheck` | TypeScript over the app and the tests. |
+| `yarn test` | The behaviour tests in [`test/`](test/). |
+| `yarn check:schema` | Checks `schema.sql` against the migrations (see *Schema changes*). |
+
+The tests run the real app in a simulated browser (jsdom) against an in-memory stand-in for Supabase. Each one signs in as a sample employee and checks what that person is offered and exactly what the app sends: for example, that HR's save never includes a role, that a leave request never carries a status, and that deleting a document only hides it. They don't test row level security or triggers; the database itself enforces those. Every push to `main` runs lint, typecheck and the tests before building, and a failure stops the deploy.
+
+## Deploy to GitHub Pages
+
+1. Push to a GitHub repository (branch `main`).
+2. Repo → Settings → Pages → Source: **GitHub Actions**.
+3. Repo → Settings → Secrets and variables → Actions → **Variables**: add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. (The anon key is public by design; data is protected by row level security.)
+4. Every push to `main` runs the checks, builds and deploys via `.github/workflows/deploy.yml`.
+
+## Security
+
+Everything private is protected in the database: row level security, column grants, triggers and functions that check who is calling. The browser holds only the public anon key, so someone calling the API directly gets exactly what the app would show them, and `anon` gets only the public job page. The page itself also:
+
+- carries a **Content Security Policy** (added at build time in [`vite.config.ts`](vite.config.ts)). Only the app's own scripts run, and it talks only to Supabase and frames only Supabase (CVs) and Google Docs (the handbook). Any new external host has to be added there.
+- **refuses to run inside another site's frame**, against clickjacking. GitHub Pages can't send the headers that would normally do this.
+- sends **no referrer**, and opens files in new tabs without a handle back to the app.
+- has **no `console` output**. Lint fails on it, so nothing about a person ends up in the browser console.
+
+Settings outside the code that keep it that way. Check them when setting up, and again now and then:
+
+| Where | Setting |
+| --- | --- |
+| Supabase → Authentication → Sign In / Providers | Google only. Email, phone and **anonymous sign-ins off**; manual identity linking off. |
+| Supabase → Authentication → URL Configuration | Exact URLs only (the Pages URL and `http://localhost:5173/`), no wildcards. |
+| Supabase → Authentication → Hooks | *Before User Created* → `public.hook_before_user_created` (see setup step 7). |
+| Supabase → Authentication → Sessions | On a paid plan, set an inactivity timeout and a time-box so a forgotten session expires. |
+| Supabase → Database → Extensions | Disable `pg_graphql`; the app uses only the REST API. |
+| Supabase → Database → Settings | Enforce SSL; restrict direct database connections to known IPs (network restrictions); strong database password. |
+| Supabase → Project Settings → API Keys | Only the publishable/anon key ever goes into `.env` or GitHub. The secret / `service_role` key bypasses every rule. Never put it in the app, the repo or CI. Rotate a key that leaks. |
+| Supabase → Advisors | Run the Security Advisor after each migration. |
+| Supabase → Logs | Auth, API and Postgres logs, for checking who signed in and what was called. |
+| Google Workspace admin | Enforce 2-Step Verification for everyone. Google is the only way in, so it is the app's MFA. Keep the OAuth client *Internal*. |
+| GitHub → Settings | Protect `main` (pull requests, required checks); keep secret scanning and Dependabot alerts on; limit who can change Actions variables. |
+
+## Schema changes
+
+- [`supabase/schema.sql`](supabase/schema.sql) is the whole current database in one readable file: tables, functions, triggers, grants, row level security and storage.
+- [`supabase/migrations/`](supabase/migrations/) is how the database got there, one timestamped file per change, applied in order by `supabase db push`.
+- Every change does both: a **new** migration (never edit one that has shipped), plus the same end state folded into `schema.sql`. One-off data moves, like backfills, stay in the migration only.
+- `yarn check:schema` builds one throwaway local database from the migrations and another from `schema.sql`, and fails if they differ. It needs the Postgres binaries on your `PATH`:
+  ```sh
+  brew install postgresql@16
+  export PATH=/opt/homebrew/opt/postgresql@16/bin:$PATH
+  yarn check:schema
+  ```
+- To roll a change out to an existing project, run `supabase db push`, or paste the new migration into the SQL editor.
+
+## Notes
+
+- Everyone lands on the **Dashboard** after signing in. It shows the announcements pinned today, this year's leave balance and up to five upcoming leaves, the next four holidays (if any are set), and at the bottom the company values: a card per value with its icon and title that flips over to the full text when tapped. The values are written in `src/components/CompanyValues.tsx`; edit them there.
+- **Resources** (*Home → Resources*, everyone) opens on **Work ethics**: the **Remote Work & Collaboration Guidelines** for Google Chat, Calendar, Meet, Docs and Jira, with a cheat sheet of each tool's golden rule and anti-pattern (filter it by tool), then the detailed norms in tabs, each with a rule of thumb and Do / Don't examples. They are static, written in `src/components/WorkingGuidelines.tsx`; edit them there.
+- Next to it is a tab of **guides for your business function**. Every department belongs to one of three functions: **Production** (product development, delivery, quality assurance, design, engineering), **Growth** (sales, marketing) or **Operations** (HR, finance). You see only your own department's function's guides; company admins see a tab for each. The database enforces this, not just the page. Departments made before functions existed have none until a company admin edits them (*Company → Departments* asks for one on every save), and until then their people see only the work ethics.
+- Guides are rows in the `guides` table, kept from the Supabase dashboard (the app only reads them). The migration adds the planned ones without links, and they show as *Coming soon*. To publish one, paste the Google Docs, Sheets or Slides link into its `doc_url` and it opens embedded at `/resources/guides/<slug>`; add a row for a new guide. Share the doc with the company's Google Workspace domain rather than "anyone with the link" or *Publish to the web*. Those make it readable by anyone who has the address, whatever the app shows.
+- **Announcements** (*Company → Announcements*, HR and company admins) are a formatted message and nothing else. Pin one with a last date and it appears on everyone's dashboard through that date, as the message alone (no author or date). Everyone can read every announcement, pinned or not, under *View all* on the dashboard: a side panel listing those from the last 4 months, newest first with the date each was posted (still no author). The message is cleaned of anything but basic formatting and links when it's saved and when it's shown. The database checks "today" in UTC, so a pin may linger a few hours past midnight local time.
+- The **Handbook** page shows a Google Doc (its address is `HANDBOOK_DOC` in `src/lib/constants.ts`). It must stay shared as *Anyone with the link can view*, or the page will show Google's sign-in or access screen instead. Anyone with that link can read it, signed in to the app or not.
+- **Profile** shows everyone their own employee record, read-only: employment, personal and bank details. Changes go through HR. Its *Equipment* tab lists what is assigned to them (name, identifier and assignment date only; see *Equipment* below), its *Payslips* tab their payslips (see *Payroll* below); *Salary* is empty for now. It reads the record fresh each time, so HR's edits show without signing in again.
+- Deleting a document hides it and keeps the file. Files are only removed for good when a company admin deletes the employee.
+- To change which statuses may log in, edit `public.is_login_status` in the migration.
+- Every employee links to a department and a designation within that department (both optional). Moving a designation to another department moves its employees with it. A department or designation can't be deleted while employees or job openings are linked to it; deleting one removes its designations, KPIs and expectations.
+- The company config migration turned the old free-text department/designation values into records, merging names that differ only by case or spacing. Designations that had no department were placed under an *Unassigned* department.
+- **Leaves.** A leave is granted only once HR *and* the employee's manager (their parent in the org chart) have approved it; if the employee has no manager in the chart, HR's approval is enough. Who approved, rejected, cancelled or changed the dates is saved on the leave. Nobody can approve, reject or change the dates of their own leave, so an HR admin's own leave needs another HR or company admin.
+- Leave days count Monday to Friday, leaving out public holidays; half days are allowed for single-day leaves. A leave can't run into the next year (split it), and unused days don't carry over.
+- **Holidays** (*Company → Holidays*, HR and company admins) are a name and a date range, kept per year: a holiday can't run into the next year, and a name is used once per year. Everyone sees the next few on their dashboard and the year's list on *My leaves*. Adding, moving or deleting a holiday recounts every leave over those dates, so days go back to (or come off) people's balances; the quota isn't checked again, so deleting a holiday can leave someone over it. A leave that falls only on a newly added holiday stays, counting 0 days. Applying for leave only on holidays is refused.
+- Each leave type has a default number of days per year (blank = no limit). Both are set up under *Company → Leaves*: the *Types* tab, and the *Quotas* tab, where HR can give one person a different number for a year. Pending and approved leave both count against the quota, and a request over it is refused, so raise the person's quota to allow more.
+- When HR records a leave for someone it already has HR's approval and only waits on the manager. HR changing a leave's dates keeps the approvals it already has.
+- Members can cancel their own leave while it's pending, or before an approved leave starts. After that only HR can change or cancel it. A leave type that has been used can't be deleted; make it inactive instead.
+- The *Leave requests* page appears for people who had direct reports in the org chart when they signed in. Someone who becomes a manager sees it after signing in again.
+- **Performance** (*People → Performance*) has a tab for each kind of person. **Me** (everyone) shows your own submitted reviews: the latest overall score, expectations met and goal progress, the overall score by month as a chart, every rating month by month, then each review to open. **My team** (anyone with direct reports in the org chart) lists your reports for a month with where their review stands, and starts or continues one. **People** (HR) lists everyone due a review that month, with their manager; people without a manager in the org chart can't be reviewed and are flagged. Opening a person shows their report and every review.
+- **Monthly reviews.** In the first ten days of each month every employee's manager (their parent in the org chart) holds a 1:1 and reviews the month before: the 1:1s held in November review October. The review copies in the employee's designation's **KPIs** (each rated 1–5, with a note, needed for 1 or 2) and **expectations** (each met or not met, with a note, needed when not met), and takes an evaluation, feedback and the quarterly goal. The manager saves a draft as they go and submits it by the 10th; it can still be submitted later, and is then marked *late*. Only the employee's current manager can fill in and submit a review; HR reads it but can't edit it.
+- Someone is due a review for a month if their status is Probation, Active or Notice period and they joined by its first day. Reviews of one person go in order: an earlier draft must be submitted before a later one.
+- The **quarterly goal**: the first review of a quarter (held in January, April, July or October) gives the outgoing goal its last progress score out of 10 and sets the goal for the new quarter; the other reviews rate progress on it. Someone with no goal yet (a new joiner, or the first reviews after this went live) gets theirs set in their next review. A quarter has one goal per person.
+- The **overall score** is the KPI ratings averaged by the KPIs' weights (each KPI counts the same if any weight is missing). It's worked out in the app, not stored.
+- Once submitted, the employee reads the review and acknowledges it; the dashboard reminds them until they do, and reminds managers of reviews still to submit. Submitting asks the manager to confirm, because a submitted review is final: nobody can change or reopen it, HR included.
+- A review keeps the KPIs and expectations as they were when it started, so later changes to them (or to the person's designation) don't rewrite past reviews. **Expectations** are set per designation under *Company → Expectations* (company admins), like KPIs. Aim for two or three KPIs per designation.
+- Months and due dates follow Pakistan time (`public.company_today`).
+- **Feedback from HR.** HR (HR admins and company admins) writes feedback to an employee from their page (*Performance → People*, open the person): a message with a label, *General*, *Appreciation* or *Improvement*. The employee reads it under *Performance → Me* and acknowledges it; the dashboard tells them about new feedback until they do. Only HR and that employee can read it, not their manager. It can't be edited once sent; HR can delete it. HR can't send feedback to themselves.
+- **Peer reviews** (*Performance → Peer cycles*, HR) run once a quarter. HR sets one up with a due date; it starts as a draft with the previous quarter's questions (or four starter ones the first time). Edit them while it's a draft: 3 to 5 questions, each answered with a rating of 1–5 (how much the reviewer agrees) and an optional comment, followed by open feedback. Add the people to be reviewed and, for each, who reviews them: anyone whose status is Probation, Active or Notice period, never themselves. HR can't make themselves a subject. *Open cycle* hands every reviewer their forms and locks the questions; reviewers can still be added. The dashboard reminds HR while the current quarter has none, and reviewers of forms still to write.
+- Reviewers find their forms under *Performance → Peer reviews*: save as they go, then submit, which is final. HR sees who has submitted and, once anyone has, every response with the reviewer's name. *Close cycle* ends it; forms not submitted by then are *missed*.
+- Once a cycle is closed, each person reads what was written about them under *Performance → Me*: the average per question, the comments and the open feedback, **without names** and in a shuffled order, and only if at least two reviewers submitted (with one, it would be obvious who wrote it). Their manager doesn't see peer reviews; HR doesn't see responses about themselves.
+- **Private notes.** A manager keeps one running note per direct report, for things to raise at the next 1:1, on the review form and on the person's page. It saves when you click out of it, or with *Save*; edit it freely as points get covered. *My team* marks who you have notes about. A note is seen only by the manager who wrote it: not the employee, not HR, not a later manager, and it's never part of a review. You can only start a note about a current direct report; you keep yours if that changes. Like everything else, notes are readable by whoever administers the Supabase project.
+- **Hiring.** HR creates job openings under *Hiring → Job openings*: title, department and designation, status, due date, a rich-text description, a hiring manager and interviewers. A job is public only while its status is **Open**: its page is `<app URL>#/careers/<job id>` (copy it from the job). The due date is the last day to apply. After it the page still shows the job but takes no applications. Leave it empty to take applications until the job is closed.
+- Applicants give their name, email, phone, expected monthly salary in PKR, one PDF CV (up to 6 MB) and an optional note. Each application is saved in the `job_applications` table, with the CV in the private `job-applications` storage bucket. One application per email address per job. A job that has applications can't be deleted; close it instead.
+- **Applications** (*Hiring → Applications*) is a board for one job at a time, with a column per stage: New, Screened, Shortlisted, Test, Interview 1–3, Cleared, Shelf, Offer sent, Hired, Rejected, Abandoned, Declined. Opening an application shows the candidate, their CV in a viewer, the stage controls and the timeline of every move.
+- An application starts at New and moves only along these steps. Hired, Rejected, Abandoned and Declined are final.
+
+  | From | To |
+  | --- | --- |
+  | New | Screened, Rejected |
+  | Screened | Shortlisted, Test, Rejected |
+  | Shortlisted | Test, Interview 1, Rejected, Abandoned |
+  | Test | Interview 1, Rejected, Abandoned |
+  | Interview 1 / 2 | the next interview, Cleared, Shelf, Rejected, Abandoned |
+  | Interview 3 | Cleared, Shelf, Rejected, Abandoned |
+  | Cleared | Shelf, Offer sent, Rejected, Abandoned |
+  | Shelf | Offer sent, Rejected, Abandoned |
+  | Offer sent | Hired, Shelf, Declined, Rejected, Abandoned |
+
+- Moving to Shelf, Rejected, Declined or Abandoned needs a reason, and moving to an interview or to Cleared needs remarks; other moves take optional remarks. HR can undo the last move (repeatedly, walking back). Undone moves stay in the timeline, marked undone.
+- **Hiring someone** (Offer sent → Hired, HR) asks for their company email and date of joining. In one step it creates their employee record (name, phone, their application email as personal email, the job's department and designation, status *Joining*) and their onboarding, then moves the application to Hired. The application then links to both. A hire can't be undone while that employee record exists; a company admin must delete the record first (which also deletes the onboarding).
+- **Onboarding** (*Human Resources → Onboarding*, HR) lists every onboarding by status: In progress, Completed, Cancelled. One is due the day after the person joins, and is flagged *Overdue* while still in progress after that. Opening one shows its checklist by section: tick tasks off (and untick them) as they're done, with who did it and when. No task is required: HR completes the onboarding whenever they're satisfied, or cancels it with a reason. Both ask for confirmation, and after either the checklist is read-only. Completing or cancelling doesn't change the employee's status. Each employee has at most one onboarding, and onboardings only come from hiring for now.
+- The **onboarding checklist** (*Configuration → Onboarding*, company admins) is a list of sections, each with tasks, in the order shown. Sections and tasks are just a name; move them up and down, rename and delete them. A new onboarding copies the checklist as it is that moment, so editing it never changes onboardings already started.
+- **Offboarding** (*Human Resources → Offboarding*, HR, and managers for their direct reports) starts by itself when someone's status is set to *Notice period*, with a copy of the offboarding checklist, and their date of separation (if set) as the last working day. Setting their status back to Probation or Active cancels it by itself; HR can also cancel one, with a reason, which leaves the status as it is. Nobody sees or works on their own offboarding, so an HR admin's needs another HR or company admin.
+- On an offboarding, HR sets the **reason** (resigned, terminated, contract ended, other) and **last working day**, and HR and the person's manager (their parent in the org chart) both tick tasks off. **Sign-off** opens once every task is ticked, the reason and last day are set, and the last day has come. Then HR and the manager each sign off; with no manager in the chart, HR alone. The last sign-off completes it and marks the person as *Left* (*Terminated* if that was the reason) from their last working day, which ends their login. Unticking a task, or changing the reason or last day, clears the sign-offs given. The manager is whoever it is in the org chart at sign-off.
+- The dashboard tells HR and managers when an offboarding is waiting for their sign-off, and managers when someone on their team is leaving. The *Offboarding* page appears for managers who had direct reports when they signed in.
+- The **offboarding checklist** (*Configuration → Offboarding*, company admins) works like the onboarding one. It starts with a suggested list (handover, equipment and access, final settlement, exit) to edit. Changes reach offboardings started after.
+- **Appraisals** (*People → Appraisals*, HR admins and company admins) are how salaries are recorded: a basic salary and contractual amount from a starting month, with an optional note for HR. HR writes one as a **Draft** (edit or delete it freely), then sends it **for review**; a company admin **approves** it, or **rejects** it back to draft with a reason, which shows on the draft. A person has at most one appraisal open (draft or in review) at a time, and an approved one can't be changed or deleted.
+- Approved appraisals are the person's **salary history**. The salary **in force** is the latest approved one whose month has come; it stays until a later one starts, so one approved for a future month shows as *Upcoming* until then. A new appraisal must start after the latest approved one. The first appraisal for someone records their starting salary.
+- Nobody writes, sends, approves, rejects or even sees their own appraisals on that page; an HR admin's raise goes through another HR admin and a company admin, and a company admin's through another company admin. Everyone sees their own approved salaries under *Profile → Salary*, without the notes. Company admins are reminded on the dashboard when appraisals wait for approval. Approving one doesn't change a payroll that's already been started; edit its draft line if needed.
+- **Payroll** (*Finance → Payroll*) is for HR admins, finance admins and company admins; nobody else can read it. There is one payroll per month and year, and payrolls are never deleted. A new payroll starts with everyone whose status is Probation, Active or Notice period. Each person's basic salary and contractual amount come from their salary for that month (see Appraisals), or, if they have none, carry over from their latest earlier payroll, as the allowance does; everything else starts at 0. HR can still change them on a draft. People can be added by hand (only those three statuses) or removed while it's a draft. A new payroll can't be started while another is still a draft, in review or approved.
+- A payroll moves **Draft → In review → Approved → Processed**. Anyone who works on payroll sends a draft for review. Only a company admin approves it, or sends it back to draft from review or approved (it then has to be reviewed and approved again). Finance (a finance admin or company admin) marks an approved payroll processed, which is final. Nothing on a payroll can be changed unless it's a draft.
+- On each line, name and employee number are fixed. HR (HR admin, company admin) sets basic salary, contractual amount, absent days (half days allowed) and HR remarks. Finance (finance admin, company admin) sets the bonus (an amount or a % of basic salary), absent deduction, allowance, arrears (pay owed from earlier months), advance salary, loan deduction, tax amount and finance remarks. The database works out the rest: **gross salary** = basic + contractual + bonus + allowance + arrears − absent deduction, and **net payable** = gross − advance − loan deduction − tax. Amounts are PKR and can't be negative.
+- *Download CSV* saves a payroll's lines, in any status, as `payroll-<year>-<month>.csv`. Remarks that start like a spreadsheet formula (`=`, `+`, `-`, `@`) get a leading `'` so they open as text.
+- A payroll line keeps the person's name and number if their employee record is later deleted.
+- **Payslips.** Once a payroll is processed, each person on it sees their payslip under *Profile → Payslips*: month, year and net pay, newest first. Opening one shows the breakdown (earnings, absent deduction, gross, deductions, net), and *Download PDF* saves it as `payslip-<year>-<month>.pdf`. The payslip leaves out the HR and finance remarks, which stay internal. It shows the person's current designation and department, not the ones they had that month. The PDF is a standard layout for now; the built-in PDF font covers Latin text only. Employees read only their own processed lines; they can't open the payroll itself.
+- **Equipment** (*Operations → Equipment*) is for HR admins, finance admins and company admins; nobody else can read it. Each item, such as a laptop, monitor, mouse or printer, has a name, an identifier typed in by hand (a serial number or asset tag; no two items can share one, ignoring case), a status (Requested, Active, Faulty, Retired, Sold), an optional purchase date and vendor, and an optional invoice (image or PDF) and photo (image), each up to 10 MB, in the private `equipment` storage bucket. Filter the list by status, or search it by name, identifier or who has it.
+- Equipment is assigned to one employee at a time, from a date (today or earlier). Reassigning ends the current holder's assignment that day; unassigning asks when it was returned. Every assignment is kept as its history. Only current employees can be given equipment, and a date can't go back past the history. Retired or sold equipment can't be assigned, and assigned equipment can't be marked retired or sold until it's unassigned. Deleting equipment deletes its files and history. Deleting an employee unassigns their equipment and drops their part of its history.
+- **Vendors** (*Configuration → Vendors*, the same people) are who equipment comes from: name (unique, ignoring case), description, bank name and account IBAN (saved without spaces, in upper case). Anyone who manages equipment adds and edits vendors; only a company admin deletes one, and not while equipment is linked to it.
+- A job's hiring team (its hiring manager and interviewers) sees its applications only while they're between Shortlisted and Cleared, and can move them only out of Shortlisted, Test or an interview. When they move one out of that range (e.g. reject it), it leaves their board. The *Applications* page appears for people who were on a hiring team when they signed in; someone added later sees it after signing in again.
+- The public page can't read any table. It only calls three database functions (`job_posting`, `public_branding`, `submit_application`), and it can only add PDFs to the folder of a job that's taking applications. There's no captcha or rate limit yet, so spam is possible, and a CV whose application fails (e.g. a duplicate email) stays in storage.
+- The job description is stored as HTML and cleaned of anything but basic formatting and links, both when it's saved and when it's shown.
+- **Branding** (*Company → Branding*, company admins) sets the logo (PNG, JPEG or WebP, up to 2 MB, in the public `branding` bucket), the primary colour, and a list of perks and benefits. For now these appear only on public job pages.
+- Employee numbers come from a database sequence: they never repeat, but a failed insert (e.g. duplicate email) can skip a number.
