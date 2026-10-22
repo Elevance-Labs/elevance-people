@@ -649,3 +649,49 @@ export interface MyPeerFeedback {
   open_feedback: string | null
   answers: { prompt: string; sort_order: number; rating: number; comment: string | null }[]
 }
+
+// HR's questions, copied into each quarter's manager feedback form when it
+// starts. 3 to 5 of them; sort_order set by the database.
+export interface ManagerFeedbackQuestion {
+  id: string
+  prompt: string
+  sort_order: number
+}
+
+// One employee's feedback on their manager for a quarter. Made by
+// manager_feedback_start and submitted by manager_feedback_submit; the
+// employee writes body (and the answers' ratings) while unsubmitted.
+export interface ManagerFeedback {
+  id: string
+  employee_id: string
+  manager_id: string | null
+  year: number
+  quarter: number
+  // The 10th of the quarter's last month.
+  due_date: string
+  body: string | null
+  created_at: string
+  updated_at: string
+  submitted_at: string | null
+  late: boolean
+}
+
+export interface ManagerFeedbackAnswer {
+  id: string
+  feedback_id: string
+  prompt: string
+  sort_order: number
+  rating: number | null
+}
+
+// A row of manager_feedback_due: someone who owes feedback that quarter.
+export interface ManagerFeedbackDue {
+  employee_id: string
+  full_name: string
+  manager_id: string | null
+  manager_name: string | null
+  feedback_id: string | null
+  due_date: string
+  submitted_at: string | null
+  late: boolean | null
+}

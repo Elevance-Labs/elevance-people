@@ -549,6 +549,21 @@ const PEER_REVIEW_ANSWERS: Row[] = [
   { id: 'pr-6', assignment_id: 'pa-2', question_id: 'pq-3', rating: 4, comment: null },
 ]
 
+// The seeded questions; Sara gave her Q1 2026 feedback on Amna.
+const MANAGER_FEEDBACK_QUESTIONS: Row[] = [
+  'Gives me clear goals and priorities.', 'Gives me useful, timely feedback.',
+  'Is available and supportive when I need help.', 'Recognises my work and treats me fairly.',
+  'Supports my growth and career development.',
+].map((prompt, i) => ({ id: `mq-${i + 1}`, prompt, sort_order: i }))
+const MANAGER_FEEDBACK: Row[] = [
+  { id: 'mf-q1', employee_id: 'e-sara', manager_id: 'e-amna', year: 2026, quarter: 1, due_date: '2026-03-10',
+    body: 'Clear priorities every sprint.', created_at: '2026-03-02T09:00:00Z', updated_at: '2026-03-04T09:00:00Z',
+    submitted_at: '2026-03-04T09:00:00Z', late: false },
+]
+const MANAGER_FEEDBACK_ANSWERS: Row[] = MANAGER_FEEDBACK_QUESTIONS.map((q, i) => ({
+  id: `ma-q1-${i}`, feedback_id: 'mf-q1', prompt: q.prompt, sort_order: i, rating: [5, 4, 4, 3, 4][i],
+}))
+
 // ---------------------------------------------------------------------------
 // The database
 // ---------------------------------------------------------------------------
@@ -649,6 +664,11 @@ function withEmbeds(table: Table, row: Row): Row {
         answers: rowsIn('peer_review_answers').filter((a) => a.assignment_id === row.id).map((a) => ({ ...a })),
       }
     }
+    case 'manager_feedback':
+      return {
+        ...row,
+        answers: rowsIn('manager_feedback_answers').filter((a) => a.feedback_id === row.id).map((a) => ({ ...a })),
+      }
     case 'peer_review_cycles':
       return {
         ...row,
@@ -725,6 +745,8 @@ function insertDefaults(table: Table, row: Row): Row {
       ...row,
     }
   }
+  // manager_feedback_questions_guard: a new question goes last.
+  if (table === 'manager_feedback_questions') return { sort_order: last(rowsIn(table)), ...row }
   // peer_review_questions_guard: a new question goes last.
   if (table === 'peer_review_questions')
     return { sort_order: last(rowsIn(table).filter((q) => q.cycle_id === row.cycle_id)), ...row }
@@ -856,6 +878,9 @@ export function reset() {
     peer_review_questions: copy(PEER_REVIEW_QUESTIONS),
     peer_review_assignments: copy(PEER_REVIEW_ASSIGNMENTS),
     peer_review_answers: copy(PEER_REVIEW_ANSWERS),
+    manager_feedback_questions: copy(MANAGER_FEEDBACK_QUESTIONS),
+    manager_feedback: copy(MANAGER_FEEDBACK),
+    manager_feedback_answers: copy(MANAGER_FEEDBACK_ANSWERS),
   }
   for (const list of Object.values(captured)) list.length = 0
   failures.clear()
@@ -1353,6 +1378,53 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     const f = find('hr_feedback', id)
     if (f) Object.assign(f, { acknowledged_at: new Date().toISOString() })
     return null
+  },
+
+  // The caller's form for this quarter, made the first time (in the quarter's
+  // last month, with a manager); the same one after that. Returns its id.
+  manager_feedback_start: () => {
+    const me = authState.bound?.id
+    const today = new Date().toISOString().slice(0, 10)
+    const year = Number(today.slice(0, 4))
+    const quarter = Math.floor((Number(today.slice(5, 7)) - 1) / 3) + 1
+    const existing = rowsIn('manager_feedback').find((f) => f.employee_id === me && f.year === year && f.quarter === quarter)
+    if (existing) return existing.id
+    const id = `new-${nextId++}`
+    rowsIn('manager_feedback').push({
+      id, employee_id: me, manager_id: rowsIn('org_chart_nodes').find((n) => n.employee_id === me)?.manager_id ?? null,
+      year, quarter, due_date: `${year}-${String(quarter * 3).padStart(2, '0')}-10`, body: null,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(), submitted_at: null, late: false,
+    })
+    ;[...rowsIn('manager_feedback_questions')].sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
+      .forEach((q, i) => rowsIn('manager_feedback_answers').push({ id: `new-${nextId++}`, feedback_id: id, prompt: q.prompt, sort_order: i, rating: null }))
+    return id
+  },
+
+  manager_feedback_submit: ({ p_feedback_id: id }) => {
+    const f = find('manager_feedback', id)
+    const today = new Date().toISOString().slice(0, 10)
+    if (f) Object.assign(f, { submitted_at: new Date().toISOString(), late: today > String(f.due_date) })
+    return null
+  },
+
+  // Who owes feedback that quarter (login status, a manager, joined by the
+  // first of its last month), with their form; never rows about the caller.
+  manager_feedback_due: ({ p_year: year, p_quarter: quarter }) => {
+    const me = authState.bound?.id
+    const opens = `${year}-${String(Number(quarter) * 3).padStart(2, '0')}-01`
+    return rowsIn('employees')
+      .map((e) => {
+        const f = rowsIn('manager_feedback').find((x) => x.employee_id === e.id && x.year === year && x.quarter === quarter)
+        const managerId = (f?.manager_id ?? rowsIn('org_chart_nodes').find((n) => n.employee_id === e.id)?.manager_id ?? null) as string | null
+        const owes = ['probation', 'active', 'notice_period'].includes(String(e.status)) && !!managerId && String(e.date_of_joining) <= opens
+        return (f || owes) && managerId !== me ? {
+          employee_id: e.id, full_name: e.full_name, manager_id: managerId, manager_name: managerId ? find('employees', managerId)?.full_name : null,
+          feedback_id: f?.id ?? null, due_date: `${year}-${String(Number(quarter) * 3).padStart(2, '0')}-10`,
+          submitted_at: f?.submitted_at ?? null, late: f?.late ?? null,
+        } : null
+      })
+      .filter(Boolean)
+      .sort((a, b) => String(a!.full_name).localeCompare(String(b!.full_name)))
   },
 
   // A draft with the latest earlier cycle's questions, or the starter ones.

@@ -7,6 +7,7 @@ import { formatDate, formatDateRange, formatDays } from '../../lib/constants'
 import { HOLIDAY_COLUMNS, LEAVE_WITH_TYPE, thisYear, todayIso, type LeaveWithType } from '../../lib/leaves'
 import { currentCycle, monthLabel } from '../../lib/performance'
 import { ASSIGNMENT_WITH_CYCLE, cycleLabel, quarterOf, type AssignmentWithCycle } from '../../lib/peerReviews'
+import { isOpen, quarterName, windowOf } from '../../lib/managerFeedback'
 import { OFFBOARDING_LIST, signOffOf, type OffboardingListRow } from '../../lib/offboarding'
 import type { Announcement, Holiday, LeaveBalance, OrgNode, PerformanceReview, ReviewDue } from '../../lib/types'
 import { PageHeader } from '../../components/common'
@@ -46,7 +47,8 @@ function Section({
 
 // What's waiting on the person in Performance: reviews of their reports still
 // to submit (managers), their own reviews and HR feedback still to acknowledge,
-// peer reviews to write, and (HR) a quarter with no peer reviews set up.
+// peer reviews to write, feedback on their manager while its window is open,
+// and (HR) a quarter with no peer reviews set up.
 function PerformanceNotices() {
   const { employee, isManager, isHr } = useAuth()
   const me = employee!.id
@@ -55,6 +57,9 @@ function PerformanceNotices() {
   const [feedback, setFeedback] = useState(0)
   const [peerToWrite, setPeerToWrite] = useState<AssignmentWithCycle[]>([])
   const [noPeerCycle, setNoPeerCycle] = useState(false)
+  // Feedback on their manager owed this quarter (the window is open, they have
+  // a manager and haven't submitted it).
+  const [managerFeedbackDue, setManagerFeedbackDue] = useState(false)
 
   useEffect(() => {
     supabase
@@ -82,6 +87,23 @@ function PerformanceNotices() {
             .sort((a, b) => a.cycle!.due_date.localeCompare(b.cycle!.due_date)),
         ),
       )
+    const period = windowOf()
+    if (isOpen(period))
+      Promise.all([
+        supabase.from('org_chart_nodes').select('manager_id').eq('employee_id', me).maybeSingle(),
+        supabase
+          .from('manager_feedback')
+          .select('submitted_at')
+          .eq('employee_id', me)
+          .eq('year', period.year)
+          .eq('quarter', period.quarter)
+          .maybeSingle(),
+      ]).then(([nodeRes, formRes]) =>
+        setManagerFeedbackDue(
+          !!(nodeRes.data as { manager_id: string | null } | null)?.manager_id &&
+            !(formRes.data as { submitted_at: string | null } | null)?.submitted_at,
+        ),
+      )
     if (isHr) {
       const { year, quarter } = quarterOf()
       supabase
@@ -97,7 +119,8 @@ function PerformanceNotices() {
       )
   }, [me, isManager, isHr])
 
-  if (!toSubmit.length && !toRead.length && !feedback && !peerToWrite.length && !noPeerCycle) return null
+  if (!toSubmit.length && !toRead.length && !feedback && !peerToWrite.length && !noPeerCycle && !managerFeedbackDue)
+    return null
   return (
     <Stack spacing={1.5} sx={{ mb: 4 }}>
       {toSubmit.length > 0 && (
@@ -155,6 +178,18 @@ function PerformanceNotices() {
         >
           {peerToWrite.length === 1 ? '1 peer review' : `${peerToWrite.length} peer reviews`} to write, due by{' '}
           {formatDate(peerToWrite[0].cycle!.due_date)}.
+        </Alert>
+      )}
+      {managerFeedbackDue && (
+        <Alert
+          severity="warning"
+          action={
+            <Button component={Link} to="/performance" color="inherit" size="small">
+              Give feedback
+            </Button>
+          }
+        >
+          Your {quarterName(windowOf())} feedback on your manager is due by {formatDate(windowOf().due)}.
         </Alert>
       )}
       {noPeerCycle && (

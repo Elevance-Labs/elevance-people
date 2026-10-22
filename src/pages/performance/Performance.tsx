@@ -37,6 +37,7 @@ import { PageHeader, PersonAvatar } from '../../components/common'
 import { PerformanceReport, ReviewList, ReviewStateChip } from '../../components/Performance'
 import { HrFeedback } from '../../components/HrFeedback'
 import { MyPeerFeedback, PeerCycles, PeerReviewList } from '../../components/PeerReviews'
+import { ManagerFeedbackAdmin, MyManagerFeedback } from '../../components/ManagerFeedback'
 
 // One page for the module; each tab shows to whoever it concerns. The tab
 // lives in the URL (?tab=team), the month on the team and people tabs too
@@ -47,6 +48,7 @@ const TABS = [
   { value: 'peer', label: 'Peer reviews', reviewersOnly: true },
   { value: 'people', label: 'People', hrOnly: true },
   { value: 'cycles', label: 'Peer cycles', hrOnly: true },
+  { value: 'manager', label: 'Manager feedback', hrOnly: true },
 ]
 
 export default function Performance() {
@@ -86,6 +88,7 @@ export default function Performance() {
       {tab === 'people' && <DueList scope="people" />}
       {tab === 'peer' && <PeerReviewList />}
       {tab === 'cycles' && <PeerCycles />}
+      {tab === 'manager' && <ManagerFeedbackAdmin />}
     </>
   )
 }
@@ -123,6 +126,7 @@ function MyPerformance() {
           {unread === 1 ? 'A review is' : `${unread} reviews are`} waiting for you to read and acknowledge.
         </Alert>
       )}
+      <MyManagerFeedback />
       <PerformanceReport reviews={reviews} />
       <HrFeedback employeeId={me} name={employee!.full_name} mode="employee" />
       <MyPeerFeedback />

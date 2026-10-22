@@ -105,8 +105,8 @@ check('…asked of the database for last month',
   rpcArgs('performance_due').join() === JSON.stringify({ p_period: '2026-05-01' }), rpcArgs('performance_due').join())
 
 await mountApp('/performance?tab=team')
-check('a manager who is also HR gets Me, My team and People (and the peer review tabs)',
-  tabLabels() === 'Me,My team,Peer reviews,People,Peer cycles', tabLabels())
+check('a manager who is also HR gets Me, My team and People (and the peer review and manager feedback tabs)',
+  tabLabels() === 'Me,My team,Peer reviews,People,Peer cycles,Manager feedback', tabLabels())
 check('My team lists only their own reports, with last month’s state',
   !!row('Sara Iqbal') && !row('Bilal Ahmed') && row('Sara Iqbal')!.textContent!.includes('Not started') &&
     text().includes('Due Jun 10, 2026 · 0 of 1 submitted'), text())
@@ -186,8 +186,8 @@ check('…and the review turns read-only, submitted',
 reset()
 signInAs(PEOPLE.hr) // Bilal: HR, manages no one
 await mountApp('/performance?tab=people')
-check('HR without reports gets Me and People (and the peer review tabs)',
-  tabLabels() === 'Me,Peer reviews,People,Peer cycles', tabLabels())
+check('HR without reports gets Me and People (and the peer review and manager feedback tabs)',
+  tabLabels() === 'Me,Peer reviews,People,Peer cycles,Manager feedback', tabLabels())
 check('People lists everyone due a review, with their manager',
   row('Sara Iqbal')!.textContent!.includes('Amna Khan') && row('Sara Iqbal')!.textContent!.includes('Not started') &&
     row('Bilal Ahmed')!.textContent!.includes('No manager') && !row('Omar Farooq'), text())

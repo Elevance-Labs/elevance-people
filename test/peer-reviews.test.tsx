@@ -55,8 +55,8 @@ await mountApp('/dashboard')
 check('HR is reminded when the quarter has no peer reviews', await waitFor(() => text().includes('No peer reviews set up for Q2 2026 yet.')))
 
 await mountApp('/performance?tab=cycles')
-check('HR has a Peer cycles tab (and Peer reviews, having reviewed Sara in Q1)',
-  tabLabels() === 'Me,Peer reviews,People,Peer cycles', tabLabels())
+check('HR has a Peer cycles tab (and Peer reviews, having reviewed Sara in Q1; and Manager feedback)',
+  tabLabels() === 'Me,Peer reviews,People,Peer cycles,Manager feedback', tabLabels())
 check('…listing each quarter with how many reviews are in',
   await waitFor(() => text().includes('Q1 2026')) && text().includes('Closed') && text().includes('2 of 2'), text())
 check('…and saying this quarter still needs one', text().includes('No peer reviews set up for Q2 2026 yet.'))

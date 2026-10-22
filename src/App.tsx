@@ -40,6 +40,7 @@ import PerformanceReview from './pages/performance/Review'
 import PerformancePerson from './pages/performance/Person'
 import PeerReview from './pages/performance/PeerReview'
 import PeerCycle from './pages/performance/PeerCycle'
+import ManagerFeedbackForm from './pages/performance/ManagerFeedbackForm'
 
 // These carry the rich text editor, so they load only when HR opens them.
 const JobOpeningForm = lazy(() => import('./pages/hiring/JobOpeningForm'))
@@ -101,6 +102,7 @@ function SignedIn() {
         <Route path="/performance/reviews/:id" element={<PerformanceReview />} />
         {(isHr || isManager) && <Route path="/performance/people/:id" element={<PerformancePerson />} />}
         <Route path="/performance/peer/:id" element={<PeerReview />} />
+        <Route path="/performance/manager-feedback/:id" element={<ManagerFeedbackForm />} />
         {isHr && <Route path="/performance/cycles/:id" element={<PeerCycle />} />}
         <Route path="/leaves" element={<MyLeaves />} />
         {(isHr || isManager) && <Route path="/leaves/requests" element={<LeaveRequests />} />}

@@ -15,7 +15,7 @@ behaviour).
   **employee records** (with documents), **org chart**, **appraisals**
   (salary history), **performance**
   (monthly 1:1 reviews: KPIs, expectations, quarterly goal; HR feedback;
-  quarterly peer reviews),
+  quarterly peer reviews; quarterly feedback on one's manager),
   **leaves** (types,
   quotas, requests, two-step approval, public holidays), **hiring** (job openings, each with a
   public application page; an applications board with stages), **human
@@ -69,7 +69,9 @@ behaviour).
   A peer review cycle is created and moves only through `peer_cycle_create`
   / `_open` / `_close`, a peer review is submitted only through
   `peer_review_submit` (final), and a subject reads responses about them
-  only through `my_peer_feedback` (anonymised).
+  only through `my_peer_feedback` (anonymised). Feedback on one's manager is
+  made only by `manager_feedback_start` and submitted only by
+  `manager_feedback_submit` (final); nothing sets a quarter up.
 - **Column grants also hide.** Clients can't select
   `job_applications.expected_salary`; HR and the hiring manager read it via
   `application_salary`. Never select `*` from that table, nor embed
@@ -119,7 +121,8 @@ behaviour).
   signed in.
 - `/dashboard` — everyone; the landing page. Performance reminders (reviews
   to submit, own reviews and HR feedback to acknowledge, peer reviews to
-  write, HR: a quarter with no peer reviews), pinned announcements (body
+  write, feedback on one's manager while open, HR: a quarter with no peer
+  reviews), pinned announcements (body
   only; *View all* opens the drawer in `components/Announcements.tsx` with the
   last 4 months'), offboarding reminders (HR and managers: to sign off; managers: a
   report leaving), appraisals to approve (company admins), own leave balance and upcoming leave, upcoming holidays, then the company values
@@ -145,7 +148,10 @@ behaviour).
   a report, HR feedback, anonymised peer feedback), *My team* (managers:
   reports' reviews for a month, `?month=`, start one), *Peer reviews*
   (anyone asked for one: their forms), *People* (HR: everyone due a review),
-  *Peer cycles* (HR: each quarter's peer reviews, set one up). `/performance/reviews/:id`
+  *Peer cycles* (HR: each quarter's peer reviews, set one up), *Manager
+  feedback* (HR: a quarter's feedback on managers, `?tab=manager`, and its
+  questions). The *Me* tab also asks for this quarter's feedback on one's
+  manager while it's open. `/performance/reviews/:id`
   — everyone (RLS decides): the form for the current manager while a draft,
   read-only otherwise (submit asks to confirm); acknowledge (the employee).
   `/performance/people/:id` — HR and managers: one person's report and reviews,
@@ -154,7 +160,9 @@ behaviour).
   `/performance/peer/:id` — everyone (RLS decides): one peer review form,
   editable by its reviewer while open and unsubmitted. `/performance/cycles/:id`
   — HR: a cycle's due date, questions (draft only), who reviews whom, open /
-  close / delete, responses with names.
+  close / delete, responses with names. `/performance/manager-feedback/:id` —
+  everyone (RLS decides): one feedback-on-manager form, editable by its
+  author until submitted or the quarter ends; read-only for HR.
 - `/leaves` — everyone: own balance and requests; apply and cancel; the year's holidays.
 - `/leaves/requests` — HR, and managers (direct reports in the org chart):
   approve/reject; HR also records leave, changes dates, cancels.
@@ -235,6 +243,9 @@ behaviour).
 - `peerReviews.ts` — peer review selects, quarters and labels, a form's
   state (to do, overdue, submitted, missed), per-question averages, the
   question and response limits (mirrors of the SQL), error messages.
+- `managerFeedback.ts` — feedback-on-manager select, a quarter's window
+  (opens, due, closes — mirrors of the SQL), a form's state, recent
+  quarters, the question limits, error messages.
 - `payslip.ts` — the payslip PDF (jsPDF, imported dynamically so it loads
   only on download).
 - `equipment.ts` — equipment select (named vendor FK), vendor select with
@@ -264,6 +275,9 @@ behaviour).
   (person page).
 - `components/PeerReviews.tsx` — a reviewer's forms list, HR's cycles list
   and set-up dialog, and the subject's anonymised peer feedback (Me tab).
+- `components/ManagerFeedback.tsx` — the employee's card for this quarter's
+  feedback on their manager (Me tab), and HR's tab: who owes it, averages
+  per manager with names, the questions.
 - `components/RichText.tsx` — TipTap editor with toolbar (heavy: only the
   lazy job form and announcements pages import it). `components/RichTextView.tsx` — sanitised read-only HTML.
 - `components/common.tsx` — logo, avatar, status chips, page header, confirm and
@@ -415,6 +429,16 @@ Full detail in `supabase/schema.sql`.
   the subject's responses from closed cycles with two or more, no reviewer,
   shuffled. `is_peer_reviewer_in` / `peer_cycle_status_of` let the policies
   refer to each other without recursion.
+- `manager_feedback_questions` (HR only; 3–5 kept by trigger; seeded) →
+  `manager_feedback` (one per employee and quarter, with the manager at the
+  time; due the 10th of the quarter's last month, generated) +
+  `manager_feedback_answers` (the questions copied in). Made only by
+  `manager_feedback_start` in the quarter's last month (login status, a
+  manager, joined by its 1st); the author writes the text and ratings until
+  submitted or `quarter_end`, by trigger; `manager_feedback_submit` stamps
+  `late` after the 10th. RLS: the author their own; HR all but feedback
+  about themselves; never the manager. `manager_feedback_due` — HR: who
+  owes it that quarter, not rows about the caller.
 - `branding` — one row: logo path, primary colour, perks (jsonb checked by
   `valid_perks`). Everyone signed in reads, company admins update; anon gets
   it via `public_branding`. Logo in the public `branding` bucket.
@@ -462,6 +486,9 @@ Full detail in `supabase/schema.sql`.
   added → `peer_cycle_open` (answers made) → reviewers save and
   `peer_review_submit` → `peer_cycle_close` → subjects read
   `my_peer_feedback`.
+- Feedback on one's manager: the quarter's last month opens it (no job) →
+  *Give feedback* → `manager_feedback_start` → saved as the author goes →
+  `manager_feedback_submit` → HR reads it.
 - Monthly review: `review_start` (manager, from *My team*) → draft saved as
   the lines and review row are updated → `review_submit` → the employee reads
   it and `review_acknowledge`s. Nothing reopens a submitted review.
