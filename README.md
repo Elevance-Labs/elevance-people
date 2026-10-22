@@ -59,8 +59,8 @@ The tests run the real app in a simulated browser (jsdom) against an in-memory s
 ## Deploy to GitHub Pages
 
 1. Push to a GitHub repository (branch `main`).
-2. Repo → Settings → Pages → Source: **GitHub Actions**.
-3. Repo → Settings → Secrets and variables → Actions → **Variables**: add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. (The anon key is public by design; data is protected by row level security.)
+2. Repo → Settings → Pages → Source: **GitHub Actions**. (On GitHub's Free plan Pages needs a public repo; until Pages is on, the deploy step fails with a 404.)
+3. Repo → Settings → Secrets and variables → Actions → **Variables**: add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. (The anon key is public by design; data is protected by row level security.) The build stops if either is missing, rather than deploying a blank page.
 4. Every push to `main` runs the checks, builds and deploys via `.github/workflows/deploy.yml`.
 
 ## Security
