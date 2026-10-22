@@ -122,8 +122,9 @@ captured.calls.length = 0
 await click(button('Delete employee'))
 check('delete asks first', dialog()?.textContent?.includes('Sara Iqbal and all their documents will be permanently deleted'))
 await click(button('Delete', dialog()!))
+// (The list it goes back to then reads its own data.)
 check('delete removes the files first, then the record',
-  captured.calls.join() === 'employee_documents.select,storage.remove,employees.delete', captured.calls.join())
+  captured.calls.slice(0, 3).join() === 'employee_documents.select,storage.remove,employees.delete', captured.calls.join())
 check('…every file, the hidden ones too',
   JSON.stringify(captured.removals) === JSON.stringify([{ bucket: 'employee-docs', paths: ['e-sara/1111.pdf', 'e-sara/2222.png'] }]),
   JSON.stringify(captured.removals))

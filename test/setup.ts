@@ -99,12 +99,26 @@ const win = () => (globalThis as unknown as { window: Window & typeof globalThis
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Whether a navigation has yet to reach the DOM; test/app.tsx sets it when it mounts the app. */
+let navigating: () => boolean = () => false
+export const trackNavigation = (pending: () => boolean) => {
+  navigating = pending
+}
+
 /**
  * Let effects, mock queries and MUI transitions settle: wait `ms`, then until
- * no spinner or loading bar is left (pages show one while they fetch), up to 3s.
+ * a navigation has committed, then until no spinner or loading bar is left
+ * (pages show one while they fetch), up to 3s each.
  */
 export async function settle(ms = 30) {
   await sleep(ms)
+  // The router renders a navigation as a React transition, which yields and,
+  // on a busy machine (CI), can still be pending here: wait for it, then for
+  // the effects it starts.
+  if (navigating()) {
+    for (let waited = 0; waited < 3000 && navigating(); waited += 20) await sleep(20)
+    await sleep(ms)
+  }
   // Indeterminate only: a determinate bar (a leave balance) is content, not loading.
   const loading = () =>
     doc().querySelector('.MuiLinearProgress-indeterminate, .MuiCircularProgress-indeterminate')

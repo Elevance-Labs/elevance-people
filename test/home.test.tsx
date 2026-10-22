@@ -352,9 +352,12 @@ check('…naming its columns, without the login binding, access role or timestam
 check('it has Profile, Equipment, Salary and Payslips tabs, Profile first',
   tabs().map((t) => t.textContent).join() === 'Profile,Equipment,Salary,Payslips' && selectedTab() === 'Profile',
   tabs().map((t) => t.textContent).join())
+// The name is the innermost heading; the number line sits right under it.
+const nameHeading = [...document.querySelectorAll('main h1')].at(-1)
 check('the header shows who I am, as on record now',
-  document.querySelector('main h1')?.textContent === 'SISara Iqbal' &&
-  text().includes('#0003 · Engineering Lead · Engineering') && text().includes('Probation'),
+  nameHeading?.textContent === 'Sara Iqbal' &&
+  nameHeading.nextElementSibling?.textContent === '#0003 · Engineering Lead · Engineering' &&
+  text().includes('Probation'),
   document.querySelector('main')?.textContent)
 check('…and my details, read from the record',
   detail('Company email') === 'sara@elevancelabs.com' && detail('Department') === 'Engineering' &&
