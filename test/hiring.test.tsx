@@ -166,6 +166,7 @@ check('a CV over 6 MB is refused', text().includes('Your CV is larger than 6 MB.
 check('the form asks for expected salary in PKR, before the CV',
   !!field('Expected salary') && text().includes('PKR') &&
   text().indexOf('Expected salary') < text().indexOf('Attach CV / resume'))
+check('…but not for the current salary, which HR records', !field('Current salary'))
 await type('Full name', 'Zara Malik')
 await type('Email address', 'zara@example.com')
 await type('Phone number', '+92 300 1234567')
@@ -324,7 +325,7 @@ check('…with each application in its stage',
 const boardSelect = captured.selects.find((x) => x.table === 'job_applications')
 check('the board asks for one job’s applications, never the expected salary',
   JSON.stringify(boardSelect?.filters) === JSON.stringify([['job_opening_id', 'eq', 'j-open']]) &&
-  !boardSelect?.columns.includes('expected_salary') && !boardSelect?.columns.includes('*'), JSON.stringify(boardSelect))
+  !['expected_salary', 'current_salary', 'hr_notes'].some((c) => boardSelect?.columns.includes(c)) && !boardSelect?.columns.includes('*'), JSON.stringify(boardSelect))
 
 await openCard('Hamza Ali')
 const d = () => dialog()!
@@ -341,6 +342,27 @@ check('the timeline shows each move with who made it and the reason, and the app
   timeline().includes('Moved to Shortlisted') && timeline().includes('Moved to Screened') &&
   timeline().includes('Good CV') && timeline().includes('Bilal Ahmed') && timeline().includes('Applied'), timeline())
 check('the applicant’s note is shown', d().textContent?.includes('Available from July.'))
+
+check('HR gets the current salary and notes to fill in, saved only once changed',
+  !!field('Current salary', d()) && !!field('Notes', d()) && !d().querySelector('[aria-label="Current salary"]') &&
+  (button('Save', d()) as HTMLButtonElement).disabled)
+await type('Current salary', '210000', d())
+await type('Notes', '  Strong React; wants remote.  ', d())
+await click(button('Save', d()))
+check('…which go through application_set_hr_details, trimmed',
+  JSON.stringify(captured.rpcs.find((r) => r.name === 'application_set_hr_details')?.args) ===
+    JSON.stringify({ p_application_id: 'a-short', p_current_salary: 210000, p_hr_notes: 'Strong React; wants remote.' }),
+  JSON.stringify(captured.rpcs.filter((r) => r.name === 'application_set_hr_details')))
+check('…then the current salary shows before the expected one',
+  await waitFor(() => d().querySelector('[aria-label="Current salary"]')?.textContent === 'PKR 210,000') &&
+  d().textContent!.indexOf('/ month current') < d().textContent!.indexOf('/ month expected'))
+check('…and Save is idle again', (button('Save', d()) as HTMLButtonElement).disabled)
+await type('Current salary', '', d())
+await type('Notes', '', d())
+await click(button('Save', d()))
+check('emptying both clears them',
+  JSON.stringify(captured.rpcs.filter((r) => r.name === 'application_set_hr_details').at(-1)?.args) ===
+    JSON.stringify({ p_application_id: 'a-short', p_current_salary: null, p_hr_notes: null }))
 
 const openMoveTo = async () => {
   dialog()!.querySelector('[role="combobox"]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
@@ -390,9 +412,11 @@ await mountApp('/applications?job=j-open')
 check('an interviewer sees only shortlisted through cleared', columnLabels().join() ===
   'Shortlisted,Test,Interview 1,Interview 2,Interview 3,Cleared', columnLabels().join())
 await openCard('Ayesha Noor')
-await waitFor(() => captured.rpcs.some((r) => r.name === 'application_salary'))
-check('an interviewer doesn’t see the expected salary', !dialog()?.querySelector('[aria-label="Expected salary"]') &&
-  !dialog()?.textContent?.includes('300,000'))
+await waitFor(() => captured.rpcs.some((r) => r.name === 'application_hr_details'))
+check('an interviewer doesn’t see the salaries or HR’s notes',
+  !dialog()?.querySelector('[aria-label="Expected salary"]') && !dialog()?.querySelector('[aria-label="Current salary"]') &&
+  !dialog()?.textContent?.includes('300,000') && !dialog()?.textContent?.includes('260,000') &&
+  !dialog()?.textContent?.includes('HR notes') && !dialog()?.textContent?.includes('Notice period of one month.'))
 check('…can’t undo', !buttons('Undo: back to Test', dialog()!).length && !dialog()?.textContent?.includes('Undo'))
 await openMoveTo()
 check('…and can move an interview on',
@@ -422,5 +446,9 @@ signInAs(PEOPLE.member)
 await mountApp('/applications?job=j-open&application=a-int')
 check('the hiring manager sees the expected salary',
   await waitFor(() => dialog()?.querySelector('[aria-label="Expected salary"]')?.textContent === 'PKR 300,000'))
+check('…and the current salary and HR’s notes, read-only',
+  dialog()?.querySelector('[aria-label="Current salary"]')?.textContent === 'PKR 260,000' &&
+  dialog()?.querySelector('[aria-label="HR notes"]')?.textContent === 'Notice period of one month.' &&
+  !field('Notes', dialog()!) && !field('Current salary', dialog()!) && !button('Save', dialog()!))
 
 done()

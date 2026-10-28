@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Box,
@@ -10,6 +10,8 @@ import {
   Paper,
   Snackbar,
   Stack,
+  Tab,
+  Tabs,
   TextField,
   Typography,
   type TextFieldProps,
@@ -91,6 +93,13 @@ function Cell({ wide, children }: { wide?: boolean; children: ReactNode }) {
   return <Grid size={wide ? 12 : { xs: 12, sm: 6, md: 4 }}>{children}</Grid>
 }
 
+// On an existing record the documents get their own tab, kept in the URL
+// (?tab=documents) so it can be linked to.
+const TABS = [
+  { value: 'details', label: 'Details' },
+  { value: 'documents', label: 'Documents' },
+]
+
 const options = (labels: Record<string, string>) =>
   Object.entries(labels).map(([value, label]) => (
     <MenuItem key={value} value={value}>
@@ -101,6 +110,8 @@ const options = (labels: Record<string, string>) =>
 export default function EmployeeForm() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
+  const tab = TABS.find((t) => t.value === params.get('tab')) ?? TABS[0]
   const { isCompanyAdmin } = useAuth()
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY)
@@ -202,17 +213,15 @@ export default function EmployeeForm() {
       .select('storage_path')
       .eq('employee_id', employee.id)
     let failure = docs.error
-    const paths = (docs.data ?? []).map((d) => d.storage_path as string)
-    if (!failure && paths.length) {
-      const removed = await supabase.storage.from(DOCS_BUCKET).remove(paths)
-      failure = removed.error as typeof failure
-    }
-    if (!failure) {
-      failure = (await supabase.from('employees').delete().eq('id', employee.id)).error
-    }
+    if (!failure) failure = (await supabase.from('employees').delete().eq('id', employee.id)).error
     setBusy(false)
     setConfirmDelete(false)
     if (failure) return setError(failure.message)
+    // A file can only be removed once no document row points at it, so the
+    // record (and its rows, by cascade) goes first. The record is gone either
+    // way, so a failure here leaves only unreachable files behind.
+    const paths = (docs.data ?? []).map((d) => d.storage_path as string)
+    if (paths.length) await supabase.storage.from(DOCS_BUCKET).remove(paths)
     navigate('/employees', { replace: true })
   }
 
@@ -260,193 +269,210 @@ export default function EmployeeForm() {
         actions={employee && <StatusChip status={employee.status} size="medium" />}
       />
 
-      <Stack spacing={3}>
-        <Box component="form" onSubmit={save}>
-          <Stack spacing={3}>
-            <Section title="Employment" description="Role, status and access to Elevance People.">
-              <Cell>
-                <TextField {...field('full_name', 'Full name', { required: true })} />
-              </Cell>
-              <Cell>
-                <TextField
-                  {...field('company_email', 'Company email', {
-                    required: true,
-                    type: 'email',
-                    placeholder: `name@${COMPANY_DOMAIN}`,
-                    // It is the login, so once the record exists only a company admin changes it.
-                    disabled: !!id && !isCompanyAdmin,
-                    helperText: id && !isCompanyAdmin ? 'Only a company admin can change this' : undefined,
-                    slotProps: {
-                      htmlInput: {
-                        pattern: `.+@${COMPANY_DOMAIN.replace('.', '\\.')}`,
-                        title: `Must be an @${COMPANY_DOMAIN} address`,
-                      },
-                    },
-                  })}
-                />
-              </Cell>
-              <Cell>
-                <TextField
-                  {...field('department_id', 'Department', {
-                    select: true,
-                    // A designation only belongs to one department, so a department change clears it.
-                    onChange: (e) => {
-                      const value = e.target.value
-                      setForm((f) => ({
-                        ...f,
-                        department_id: value,
-                        designation_id: designations.some((d) => d.id === f.designation_id && d.department_id === value)
-                          ? f.designation_id
-                          : '',
-                      }))
-                    },
-                    helperText: departments.length
-                      ? undefined
-                      : isCompanyAdmin
-                        ? 'Add departments under Company → Departments'
-                        : 'No departments set up yet. Ask a company admin.',
-                  })}
-                >
-                  <MenuItem value="">
-                    <em>None</em>
-                  </MenuItem>
-                  {departments.map((d) => (
-                    <MenuItem key={d.id} value={d.id}>
-                      {d.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Cell>
-              <Cell>
-                <TextField
-                  {...field('designation_id', 'Designation', {
-                    select: true,
-                    disabled: !form.department_id,
-                    helperText: !form.department_id
-                      ? 'Pick a department first'
-                      : departmentDesignations.length
-                        ? undefined
-                        : 'This department has no designations yet',
-                  })}
-                >
-                  <MenuItem value="">
-                    <em>None</em>
-                  </MenuItem>
-                  {departmentDesignations.map((d) => (
-                    <MenuItem key={d.id} value={d.id}>
-                      {d.title}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Cell>
-              <Cell>
-                <TextField {...field('employment_type', 'Employment type', { select: true })}>
-                  {options(EMPLOYMENT_TYPE_LABELS)}
-                </TextField>
-              </Cell>
-              <Cell>
-                <TextField
-                  {...field('status', 'Status', {
-                    select: true,
-                    // Mirrors employees_offboarding.
-                    helperText:
-                      form.status === 'notice_period' && employee?.status !== 'notice_period'
-                        ? 'Saving starts their offboarding'
-                        : employee?.status === 'notice_period' && ['probation', 'active'].includes(form.status)
-                          ? 'Saving cancels their offboarding'
-                          : undefined,
-                  })}
-                >
-                  {options(STATUS_LABELS)}
-                </TextField>
-              </Cell>
-              <Cell>
-                <TextField {...field('date_of_joining', 'Date of joining', { type: 'date', required: true })} />
-              </Cell>
-              <Cell>
-                <TextField {...field('date_of_separation', 'Date of separation', { type: 'date' })} />
-              </Cell>
-              <Cell>
-                <TextField
-                  {...field('app_role', 'Access role', {
-                    select: true,
-                    disabled: !isCompanyAdmin,
-                    helperText: isCompanyAdmin ? undefined : 'Only a company admin can change this',
-                  })}
-                >
-                  {options(APP_ROLE_LABELS)}
-                </TextField>
-              </Cell>
-            </Section>
-
-            <Section title="Personal" description="Contact and identity details.">
-              <Cell>
-                <TextField {...field('personal_email', 'Personal email', { type: 'email' })} />
-              </Cell>
-              <Cell>
-                <TextField {...field('phone', 'Phone number', { type: 'tel' })} />
-              </Cell>
-              <Cell>
-                <TextField {...field('dob', 'Date of birth', { type: 'date' })} />
-              </Cell>
-              <Cell>
-                <TextField {...field('cnic_number', 'CNIC number', { placeholder: '00000-0000000-0' })} />
-              </Cell>
-              <Cell>
-                <TextField {...field('cnic_expiry', 'CNIC expiry', { type: 'date' })} />
-              </Cell>
-              <Cell wide>
-                <TextField
-                  {...field('emergency_contact', 'Emergency contact details', {
-                    multiline: true,
-                    minRows: 3,
-                    placeholder: 'Name, relationship, phone number',
-                  })}
-                />
-              </Cell>
-            </Section>
-
-            <Section title="Bank" description="Where salary is paid.">
-              <Cell>
-                <TextField {...field('bank', 'Bank')} />
-              </Cell>
-              <Cell>
-                <TextField {...field('iban', 'IBAN')} />
-              </Cell>
-            </Section>
-
-            {error && <Alert severity="error">{error}</Alert>}
-
-            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-              {employee && isCompanyAdmin && (
-                <Button
-                  color="error"
-                  startIcon={<DeleteOutlineIcon />}
-                  onClick={() => setConfirmDelete(true)}
-                  disabled={busy}
-                >
-                  Delete employee
-                </Button>
-              )}
-              <Box sx={{ flexGrow: 1 }} />
-              <Button component={Link} to="/employees" disabled={busy}>
-                Cancel
-              </Button>
-              <Button type="submit" variant="contained" loading={busy}>
-                {employee ? 'Save changes' : 'Create employee'}
-              </Button>
-            </Stack>
-          </Stack>
+      {employee && (
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+          <Tabs
+            value={tab.value}
+            onChange={(_e, value: string) => setParams(value === 'details' ? {} : { tab: value }, { replace: true })}
+            variant="scrollable"
+            allowScrollButtonsMobile
+          >
+            {TABS.map((t) => (
+              <Tab key={t.value} value={t.value} label={t.label} />
+            ))}
+          </Tabs>
         </Box>
+      )}
 
-        {employee ? (
-          <Documents employeeId={employee.id} />
-        ) : (
-          <Alert severity="info" variant="outlined">
-            Documents can be uploaded after the employee is created.
-          </Alert>
-        )}
-      </Stack>
+      {employee && tab.value === 'documents' ? (
+        <Documents employeeId={employee.id} />
+      ) : (
+        <Stack spacing={3}>
+          <Box component="form" onSubmit={save}>
+            <Stack spacing={3}>
+              <Section title="Employment" description="Role, status and access to Elevance People.">
+                <Cell>
+                  <TextField {...field('full_name', 'Full name', { required: true })} />
+                </Cell>
+                <Cell>
+                  <TextField
+                    {...field('company_email', 'Company email', {
+                      required: true,
+                      type: 'email',
+                      placeholder: `name@${COMPANY_DOMAIN}`,
+                      // It is the login, so once the record exists only a company admin changes it.
+                      disabled: !!id && !isCompanyAdmin,
+                      helperText: id && !isCompanyAdmin ? 'Only a company admin can change this' : undefined,
+                      slotProps: {
+                        htmlInput: {
+                          pattern: `.+@${COMPANY_DOMAIN.replace('.', '\\.')}`,
+                          title: `Must be an @${COMPANY_DOMAIN} address`,
+                        },
+                      },
+                    })}
+                  />
+                </Cell>
+                <Cell>
+                  <TextField
+                    {...field('department_id', 'Department', {
+                      select: true,
+                      // A designation only belongs to one department, so a department change clears it.
+                      onChange: (e) => {
+                        const value = e.target.value
+                        setForm((f) => ({
+                          ...f,
+                          department_id: value,
+                          designation_id: designations.some((d) => d.id === f.designation_id && d.department_id === value)
+                            ? f.designation_id
+                            : '',
+                        }))
+                      },
+                      helperText: departments.length
+                        ? undefined
+                        : isCompanyAdmin
+                          ? 'Add departments under Company → Departments'
+                          : 'No departments set up yet. Ask a company admin.',
+                    })}
+                  >
+                    <MenuItem value="">
+                      <em>None</em>
+                    </MenuItem>
+                    {departments.map((d) => (
+                      <MenuItem key={d.id} value={d.id}>
+                        {d.name}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Cell>
+                <Cell>
+                  <TextField
+                    {...field('designation_id', 'Designation', {
+                      select: true,
+                      disabled: !form.department_id,
+                      helperText: !form.department_id
+                        ? 'Pick a department first'
+                        : departmentDesignations.length
+                          ? undefined
+                          : 'This department has no designations yet',
+                    })}
+                  >
+                    <MenuItem value="">
+                      <em>None</em>
+                    </MenuItem>
+                    {departmentDesignations.map((d) => (
+                      <MenuItem key={d.id} value={d.id}>
+                        {d.title}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Cell>
+                <Cell>
+                  <TextField {...field('employment_type', 'Employment type', { select: true })}>
+                    {options(EMPLOYMENT_TYPE_LABELS)}
+                  </TextField>
+                </Cell>
+                <Cell>
+                  <TextField
+                    {...field('status', 'Status', {
+                      select: true,
+                      // Mirrors employees_offboarding.
+                      helperText:
+                        form.status === 'notice_period' && employee?.status !== 'notice_period'
+                          ? 'Saving starts their offboarding'
+                          : employee?.status === 'notice_period' && ['probation', 'active'].includes(form.status)
+                            ? 'Saving cancels their offboarding'
+                            : undefined,
+                    })}
+                  >
+                    {options(STATUS_LABELS)}
+                  </TextField>
+                </Cell>
+                <Cell>
+                  <TextField {...field('date_of_joining', 'Date of joining', { type: 'date', required: true })} />
+                </Cell>
+                <Cell>
+                  <TextField {...field('date_of_separation', 'Date of separation', { type: 'date' })} />
+                </Cell>
+                <Cell>
+                  <TextField
+                    {...field('app_role', 'Access role', {
+                      select: true,
+                      disabled: !isCompanyAdmin,
+                      helperText: isCompanyAdmin ? undefined : 'Only a company admin can change this',
+                    })}
+                  >
+                    {options(APP_ROLE_LABELS)}
+                  </TextField>
+                </Cell>
+              </Section>
+
+              <Section title="Personal" description="Contact and identity details.">
+                <Cell>
+                  <TextField {...field('personal_email', 'Personal email', { type: 'email' })} />
+                </Cell>
+                <Cell>
+                  <TextField {...field('phone', 'Phone number', { type: 'tel' })} />
+                </Cell>
+                <Cell>
+                  <TextField {...field('dob', 'Date of birth', { type: 'date' })} />
+                </Cell>
+                <Cell>
+                  <TextField {...field('cnic_number', 'CNIC number', { placeholder: '00000-0000000-0' })} />
+                </Cell>
+                <Cell>
+                  <TextField {...field('cnic_expiry', 'CNIC expiry', { type: 'date' })} />
+                </Cell>
+                <Cell wide>
+                  <TextField
+                    {...field('emergency_contact', 'Emergency contact details', {
+                      multiline: true,
+                      minRows: 3,
+                      placeholder: 'Name, relationship, phone number',
+                    })}
+                  />
+                </Cell>
+              </Section>
+
+              <Section title="Bank" description="Where salary is paid.">
+                <Cell>
+                  <TextField {...field('bank', 'Bank')} />
+                </Cell>
+                <Cell>
+                  <TextField {...field('iban', 'IBAN')} />
+                </Cell>
+              </Section>
+
+              {error && <Alert severity="error">{error}</Alert>}
+
+              <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                {employee && isCompanyAdmin && (
+                  <Button
+                    color="error"
+                    startIcon={<DeleteOutlineIcon />}
+                    onClick={() => setConfirmDelete(true)}
+                    disabled={busy}
+                  >
+                    Delete employee
+                  </Button>
+                )}
+                <Box sx={{ flexGrow: 1 }} />
+                <Button component={Link} to="/employees" disabled={busy}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="contained" loading={busy}>
+                  {employee ? 'Save changes' : 'Create employee'}
+                </Button>
+              </Stack>
+            </Stack>
+          </Box>
+
+          {!employee && (
+            <Alert severity="info" variant="outlined">
+              Documents can be uploaded after the employee is created.
+            </Alert>
+          )}
+        </Stack>
+      )}
 
       <ConfirmDialog
         open={confirmDelete}

@@ -213,8 +213,11 @@ export interface JobApplication {
   email: string
   phone: string
   // Monthly, in PKR. Null only on applications sent before it was asked.
-  // Clients can't select it: read it through the application_salary RPC.
   expected_salary: number | null
+  // HR's: monthly, in PKR, and one block of notes.
+  current_salary: number | null
+  hr_notes: string | null
+  // Clients can't select these three: read them through application_hr_details.
   stage: ApplicationStage
   stage_changed_at: string
   note: string | null

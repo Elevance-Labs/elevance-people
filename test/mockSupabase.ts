@@ -191,7 +191,7 @@ const JOB_OPENING_INTERVIEWERS: Row[] = [{ job_opening_id: 'j-open', employee_id
 function application(id: string, full_name: string, stage: string, expected_salary: number, extra: Row = {}): Row {
   return {
     id, job_opening_id: 'j-open', full_name, email: `${id}@example.com`, phone: '0300 1234567',
-    expected_salary, note: null, resume_path: `j-open/${id}.pdf`, resume_name: `${full_name} CV.pdf`,
+    expected_salary, current_salary: null, hr_notes: null, note: null, resume_path: `j-open/${id}.pdf`, resume_name: `${full_name} CV.pdf`,
     created_at: '2026-05-10T09:00:00Z', stage, stage_changed_at: '2026-05-20T09:00:00Z', ...extra,
   }
 }
@@ -201,7 +201,9 @@ function application(id: string, full_name: string, stage: string, expected_sala
 const JOB_APPLICATIONS: Row[] = [
   application('a-new', 'Zara Malik', 'new', 180000),
   application('a-short', 'Hamza Ali', 'shortlisted', 250000, { note: 'Available from July.' }),
-  application('a-int', 'Ayesha Noor', 'interview_1', 300000),
+  application('a-int', 'Ayesha Noor', 'interview_1', 300000, {
+    current_salary: 260000, hr_notes: 'Notice period of one month.',
+  }),
   application('a-cleared', 'Fatima Shah', 'cleared', 320000),
   application('a-rej', 'Usman Tariq', 'rejected', 150000),
 ]
@@ -1080,12 +1082,20 @@ const RPCS: Record<string, (args: Row) => unknown> = {
       rowsIn('job_opening_interviewers').some((i) => i.employee_id === me)
   },
 
-  // HR, or the job's hiring manager; null for anyone else.
-  application_salary: ({ p_application_id: id }) => {
+  // HR, or the job's hiring manager; no row for anyone else.
+  application_hr_details: ({ p_application_id: id }) => {
     const a = find('job_applications', id)
     const me = authState.bound
     const hr = me?.app_role === 'hr_admin' || me?.app_role === 'company_admin'
-    return a && (hr || find('job_openings', a.job_opening_id)?.manager_id === me?.id) ? a.expected_salary : null
+    return a && (hr || find('job_openings', a.job_opening_id)?.manager_id === me?.id)
+      ? { current_salary: a.current_salary, expected_salary: a.expected_salary, hr_notes: a.hr_notes }
+      : null
+  },
+
+  application_set_hr_details: ({ p_application_id: id, p_current_salary, p_hr_notes }) => {
+    const a = find('job_applications', id)
+    if (a) Object.assign(a, { current_salary: p_current_salary, hr_notes: p_hr_notes })
+    return null
   },
 
   application_move: ({ p_application_id: id, p_stage: stage, p_reason: reason }) => {

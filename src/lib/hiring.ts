@@ -13,7 +13,7 @@ export type JobOpeningWithNames = JobOpening & {
 // Embeds name each FK: job_openings references employees twice (manager and
 // created_by), so keep every join unambiguous. Applications are counted by
 // the application_count computed field, never job_applications(count): that
-// is a whole-row reference, refused since expected_salary is hidden.
+// is a whole-row reference, refused since some columns are hidden.
 export const JOB_OPENING_WITH_NAMES =
   'id, title, department_id, designation_id, status, due_date, description, manager_id, created_by, created_at, updated_at, ' +
   'department:departments!job_openings_department_id_fkey(name), ' +
@@ -113,7 +113,9 @@ export function undoableMove(events: ApplicationStageEvent[], stage: Application
   return last && last.to_stage === stage ? last : null
 }
 
-// Every column but expected_salary, which clients can't select.
+// Every column but the salaries and HR's notes, which clients can't select.
 export const APPLICATION_COLUMNS =
   'id, job_opening_id, full_name, email, phone, note, resume_path, resume_name, created_at, stage, stage_changed_at'
-export type BoardApplication = Omit<JobApplication, 'expected_salary'>
+// Those, from application_hr_details (HR and the job's hiring manager).
+export type ApplicationHrDetails = Pick<JobApplication, 'current_salary' | 'expected_salary' | 'hr_notes'>
+export type BoardApplication = Omit<JobApplication, keyof ApplicationHrDetails>

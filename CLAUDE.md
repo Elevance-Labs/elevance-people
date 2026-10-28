@@ -49,7 +49,8 @@ behaviour).
   convenience, never the only guard.
 - **Some state changes only through RPCs.** A leave's status and approvals are
   not client-writable; `leave_decide` / `leave_cancel` are the only way in.
-  Job applications are written only by `submit_application`; their stage
+  Job applications are written only by `submit_application` (HR's current
+  salary and notes by `application_set_hr_details`); their stage
   moves only through `application_move` / `application_undo`, and to hired
   only through `application_hire`. Onboardings change only through
   `onboarding_task_set` / `_complete` / `_cancel`; checklist order only
@@ -73,8 +74,9 @@ behaviour).
   made only by `manager_feedback_start` and submitted only by
   `manager_feedback_submit` (final); nothing sets a quarter up.
 - **Column grants also hide.** Clients can't select
-  `job_applications.expected_salary`; HR and the hiring manager read it via
-  `application_salary`. Never select `*` from that table, nor embed
+  `job_applications.expected_salary`, `current_salary` or `hr_notes`; HR and
+  the hiring manager read them via `application_hr_details`, and only HR
+  writes the last two, via `application_set_hr_details`. Never select `*` from that table, nor embed
   `job_applications(count)` (PostgREST makes that a whole-row reference, which
   is refused); count with the `application_count` computed field.
 - **Stored HTML is untrusted.** Job descriptions and announcements are
@@ -138,8 +140,9 @@ behaviour).
 - `/appraisals` — HR: salary revisions by status (`?status=`, drafts by
   default); write drafts, send for review; company admins approve / reject.
   A name opens that person's salary history. Never your own (RLS).
-- `/employees/new`, `/employees/:id` — `EmployeeForm`: create/edit a record,
-  plus its documents. Roles, and on edit the company email, are only sent
+- `/employees/new`, `/employees/:id` — `EmployeeForm`: create/edit a record;
+  on edit, tabs *Details* and *Documents* (tab in `?tab=`; deleted documents
+  behind *Show deleted*). Roles, and on edit the company email, are only sent
   by company admins; delete is
   company-admin only.
 - `/org-chart` — everyone. Reads `employee_directory`; HR can place, move and
@@ -260,7 +263,7 @@ behaviour).
   designation picker's options, and mapping Postgres error codes to messages.
 - `components/Layout.tsx` — app bar, role-filtered nav drawer, account menu.
 - `components/Documents.tsx` — an employee's document list: upload to the
-  private bucket, open via signed URL, soft delete.
+  private bucket, open via signed URL, soft delete, *Show deleted* toggle.
 - `components/Leaves.tsx` — leave status chip, approval progress, balance
   cards, holiday list, and the apply / record / change-dates dialog (reads
   the year's holidays for its count).
@@ -301,8 +304,10 @@ Full detail in `supabase/schema.sql`.
   its department, and the FK keeps them consistent). HR reads/writes all; a
   member reads only their own row.
 - `employee_documents` — metadata for files in the private `employee-docs`
-  bucket at `<employee_id>/…`. Soft delete only from the app; files and rows
-  are removed for good only when a company admin deletes the employee.
+  bucket at `<employee_id>/…`. Soft delete only: no client delete grant (rows
+  go only by cascade with the employee), and the storage policy removes a
+  file only once no row points at it. HR reads deleted rows; the employee
+  doesn't.
 - `org_chart_nodes` — one row per placed person with an optional manager;
   trigger refuses cycles. `org_chart_remove` lifts a person's reports to their
   manager.
@@ -330,7 +335,9 @@ Full detail in `supabase/schema.sql`.
   composite FK as employees. Public only while `open`; takes applications
   until `due_date`. `created_by` stamped by trigger.
 - `job_applications` — written only by `submit_application` (security
-  definer, callable by anon). `stage` (enum, starts `new`) changes only via
+  definer, callable by anon); HR's current salary and notes only by
+  `application_set_hr_details`, read with the expected salary through
+  `application_hr_details` (HR and the hiring manager). `stage` (enum, starts `new`) changes only via
   `application_move` (allowed steps in `application_next_stages`; text
   required per `application_stage_needs_reason`), `application_hire` (to
   hired) and HR's `application_undo`. Visible to HR, and to the hiring team from shortlisted
@@ -463,8 +470,8 @@ Full detail in `supabase/schema.sql`.
 - Document upload: storage upload → `employee_documents` insert (trigger stamps
   `uploaded_by`). Delete in the app = set `deleted_at` (trigger stamps
   `deleted_by`).
-- Employee delete (company admin): remove storage files → delete row → cascades
-  to documents and org chart node.
+- Employee delete (company admin): delete row → cascades to documents and org
+  chart node → remove storage files (only then allowed).
 - Leave: insert (`leaves_guard` validates) → `leave_decide` by HR and the
   manager, in either order → approved. Approvers are resolved from the org
   chart at decision time, not stored at application.

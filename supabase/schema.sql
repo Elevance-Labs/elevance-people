@@ -158,7 +158,8 @@ create table public.employee_documents (
   size_bytes   bigint not null,
   uploaded_by  uuid references public.employees (id) on delete set null,
   created_at   timestamptz not null default now(),
-  -- Soft delete: hidden in the app, file and row are kept.
+  -- Soft delete only: hidden in the app, file and row are kept. Neither goes
+  -- until the employee is deleted.
   deleted_at   timestamptz,
   deleted_by   uuid references public.employees (id) on delete set null
 );
@@ -335,7 +336,11 @@ create table public.job_applications (
   expected_salary integer check (expected_salary >= 0),
   -- Changed only by application_move / application_undo.
   stage            public.application_stage not null default 'new',
-  stage_changed_at timestamptz not null default now()
+  stage_changed_at timestamptz not null default now(),
+  -- HR's: monthly, in PKR, and their notes. Set only by
+  -- application_set_hr_details; hidden like expected_salary.
+  current_salary integer check (current_salary >= 0),
+  hr_notes       text check (length(hr_notes) <= 5000)
 );
 create unique index job_applications_email_key on public.job_applications (job_opening_id, email);
 create index job_applications_job_stage_idx on public.job_applications (job_opening_id, stage);
@@ -1709,7 +1714,8 @@ $$;
 -- Application stages. HR sees and moves every application. A job's hiring
 -- manager and interviewers (its hiring team) see its applications from
 -- shortlisted through cleared, and move them out of shortlisted, test and
--- the interviews. Only HR and the hiring manager see the expected salary.
+-- the interviews. Only HR and the hiring manager see the salaries and HR's
+-- notes; only HR writes the current salary and the notes.
 -- ---------------------------------------------------------------------------
 
 -- Where an application may go next. Mirrored in src/lib/hiring.ts.
@@ -1777,21 +1783,40 @@ $$;
 
 -- A job's applications that the caller can see. A computed field
 -- (select=…,application_count): PostgREST's embedded count would be a
--- whole-row reference, refused because expected_salary isn't selectable.
+-- whole-row reference, refused because the hidden columns aren't selectable.
 create function public.application_count(p_job public.job_openings)
 returns integer language sql stable set search_path = '' as $$
   select count(*)::integer from public.job_applications a where a.job_opening_id = p_job.id;
 $$;
 
--- Expected salary, for HR and the job's hiring manager. Null for anyone else.
-create function public.application_salary(p_application_id uuid)
-returns integer language sql stable security definer set search_path = '' as $$
-  select a.expected_salary
+-- Current and expected salary and HR's notes, for HR and the job's hiring
+-- manager. No row for anyone else.
+create function public.application_hr_details(p_application_id uuid)
+returns table (current_salary integer, expected_salary integer, hr_notes text)
+language sql stable security definer set search_path = '' as $$
+  select a.current_salary, a.expected_salary, a.hr_notes
     from public.job_applications a
     join public.job_openings j on j.id = a.job_opening_id
    where a.id = p_application_id
      and public.can_see_application(a.job_opening_id, a.stage)
      and (public.is_hr() or j.manager_id = public.current_employee_id());
+$$;
+
+-- HR sets an application's current salary and notes (empty notes clear them).
+create function public.application_set_hr_details(
+  p_application_id uuid, p_current_salary integer, p_hr_notes text)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.is_hr() then
+    raise exception 'Only HR can change these details.' using errcode = '42501';
+  end if;
+  update public.job_applications
+     set current_salary = p_current_salary, hr_notes = nullif(trim(p_hr_notes), '')
+   where id = p_application_id;
+  if not found then
+    raise exception 'Application not found.' using errcode = 'P0002';
+  end if;
+end;
 $$;
 
 -- Move an application to one of its next stages (with a reason where one is
@@ -3302,7 +3327,7 @@ grant insert (full_name, company_email, date_of_joining, date_of_separation, per
               emergency_contact, employment_type, status, app_role)
   on public.employees to authenticated;
 
-grant select, delete on public.employee_documents to authenticated;
+grant select on public.employee_documents to authenticated;
 grant insert (employee_id, doc_type, file_name, storage_path, mime_type, size_bytes),
       update (deleted_at)
   on public.employee_documents to authenticated;
@@ -3342,7 +3367,8 @@ grant insert (title, department_id, designation_id, status, due_date, descriptio
   on public.job_openings to authenticated;
 grant select, insert, delete on public.job_opening_interviewers to authenticated;
 -- Applications are only ever written by submit_application and the stage
--- functions. Every column but expected_salary (see application_salary).
+-- functions. Every column but the salaries and HR's notes (see
+-- application_hr_details).
 grant select (id, job_opening_id, full_name, email, phone, note, resume_path, resume_name,
               created_at, stage, stage_changed_at)
   on public.job_applications to authenticated;
@@ -3447,7 +3473,8 @@ revoke execute on function
   public.application_team_stage(public.application_stage),
   public.application_team_movable(public.application_stage),
   public.is_hiring_team(uuid), public.on_hiring_team(),
-  public.can_see_application(uuid, public.application_stage), public.application_salary(uuid),
+  public.can_see_application(uuid, public.application_stage), public.application_hr_details(uuid),
+  public.application_set_hr_details(uuid, integer, text),
   public.application_move(uuid, public.application_stage, text),
   public.application_undo(uuid, text), public.application_count(public.job_openings),
   public.onboarding_template_sections_stamp(), public.onboarding_template_tasks_stamp(),
@@ -3491,7 +3518,8 @@ grant execute on function
   public.application_team_stage(public.application_stage),
   public.application_team_movable(public.application_stage),
   public.is_hiring_team(uuid), public.on_hiring_team(),
-  public.can_see_application(uuid, public.application_stage), public.application_salary(uuid),
+  public.can_see_application(uuid, public.application_stage), public.application_hr_details(uuid),
+  public.application_set_hr_details(uuid, integer, text),
   public.application_move(uuid, public.application_stage, text),
   public.application_undo(uuid, text), public.application_count(public.job_openings),
   public.onboarding_reorder_sections(uuid[]), public.onboarding_reorder_tasks(uuid, uuid[]),
@@ -3588,8 +3616,8 @@ create policy employees_update on public.employees for update to authenticated
 create policy employees_delete on public.employees for delete to authenticated
   using ((select public.is_company_admin()));
 
--- Documents. HR must be able to see soft-deleted rows for the soft-delete
--- UPDATE to pass RLS; the app filters them out.
+-- Documents. HR sees soft-deleted rows (the app shows them on request, and
+-- the soft-delete UPDATE needs them to pass RLS); the employee doesn't.
 create policy employee_documents_select on public.employee_documents for select to authenticated
   using ((select public.is_hr())
          or (employee_id = (select public.current_employee_id()) and deleted_at is null));
@@ -3597,8 +3625,7 @@ create policy employee_documents_insert on public.employee_documents for insert 
   with check ((select public.is_hr()));
 create policy employee_documents_update on public.employee_documents for update to authenticated
   using ((select public.is_hr())) with check ((select public.is_hr()));
-create policy employee_documents_delete on public.employee_documents for delete to authenticated
-  using ((select public.is_company_admin()));
+-- No delete: a document row goes only with its employee (cascade).
 
 -- Org chart: every employee can view, HR/company admins can change.
 create policy org_chart_select on public.org_chart_nodes for select to authenticated
@@ -3975,9 +4002,12 @@ create policy employee_docs_read on storage.objects for select to authenticated
               or (storage.foldername(name))[1] = (select public.current_employee_id())::text));
 create policy employee_docs_upload on storage.objects for insert to authenticated
   with check (bucket_id = 'employee-docs' and (select public.is_hr()));
--- Files are only ever removed when a company admin deletes the employee.
+-- Files are only ever removed when a company admin deletes the employee:
+-- once no document row points at the file any more.
 create policy employee_docs_delete on storage.objects for delete to authenticated
-  using (bucket_id = 'employee-docs' and (select public.is_company_admin()));
+  using (bucket_id = 'employee-docs'
+         and (select public.is_company_admin())
+         and not exists (select 1 from public.employee_documents d where d.storage_path = objects.name));
 
 -- ---------------------------------------------------------------------------
 -- Storage: job application CVs (private, <job_opening_id>/<uuid>.pdf) and the

@@ -5,6 +5,7 @@ import {
   Box,
   Button,
   Chip,
+  FormControlLabel,
   IconButton,
   List,
   ListItem,
@@ -13,6 +14,7 @@ import {
   MenuItem,
   Paper,
   Stack,
+  Switch,
   TextField,
   Tooltip,
   Typography,
@@ -34,6 +36,8 @@ function formatSize(bytes: number) {
     : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+// Documents are never deleted, only hidden (deleted_at): the database keeps
+// the row and the file until the employee is deleted. HR can show them again.
 export default function Documents({ employeeId }: { employeeId: string }) {
   const [docs, setDocs] = useState<EmployeeDocument[]>([])
   const [docType, setDocType] = useState(DOC_TYPES[0])
@@ -41,18 +45,19 @@ export default function Documents({ employeeId }: { employeeId: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toDelete, setToDelete] = useState<EmployeeDocument | null>(null)
+  const [showDeleted, setShowDeleted] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
-    const { data, error: loadError } = await supabase
+    let query = supabase
       .from('employee_documents')
       .select('id, employee_id, doc_type, file_name, storage_path, mime_type, size_bytes, created_at, deleted_at')
       .eq('employee_id', employeeId)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
+    if (!showDeleted) query = query.is('deleted_at', null)
+    const { data, error: loadError } = await query.order('created_at', { ascending: false })
     if (loadError) setError(loadError.message)
     else setDocs(data as EmployeeDocument[])
-  }, [employeeId])
+  }, [employeeId, showDeleted])
 
   useEffect(() => {
     load()
@@ -130,12 +135,21 @@ export default function Documents({ employeeId }: { employeeId: string }) {
 
   return (
     <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
-      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-        Documents
-      </Typography>
-      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2.5 }}>
-        Images or PDFs, up to 10 MB each.
-      </Typography>
+      <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-start', mb: 2.5 }}>
+        <Box sx={{ flexGrow: 1 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            Documents
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Images or PDFs, up to 10 MB each.
+          </Typography>
+        </Box>
+        <FormControlLabel
+          control={<Switch size="small" checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} />}
+          label="Show deleted"
+          sx={{ mr: 0, whiteSpace: 'nowrap' }}
+        />
+      </Stack>
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ alignItems: { sm: 'center' } }}>
         <TextField
@@ -198,14 +212,16 @@ export default function Documents({ employeeId }: { employeeId: string }) {
                       <OpenInNewIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="Delete">
-                    <IconButton edge="end" onClick={() => setToDelete(doc)}>
-                      <DeleteOutlineIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
+                  {!doc.deleted_at && (
+                    <Tooltip title="Delete">
+                      <IconButton edge="end" onClick={() => setToDelete(doc)}>
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                 </>
               }
-              sx={{ pr: 12 }}
+              sx={{ pr: 12, ...(doc.deleted_at && { '& .MuiListItemText-root, & .MuiAvatar-root': { opacity: 0.55 } }) }}
             >
               <ListItemAvatar>
                 <Avatar variant="rounded" sx={{ bgcolor: 'action.selected', color: 'text.secondary' }}>
@@ -219,23 +235,30 @@ export default function Documents({ employeeId }: { employeeId: string }) {
                       {doc.file_name}
                     </Box>
                     <Chip label={doc.doc_type} size="small" variant="outlined" />
+                    {doc.deleted_at && <Chip label="Deleted" size="small" color="error" variant="outlined" />}
                   </Stack>
                 }
-                secondary={`${formatSize(doc.size_bytes)} · uploaded ${new Date(doc.created_at).toLocaleDateString()}`}
+                secondary={[
+                  formatSize(doc.size_bytes),
+                  `uploaded ${new Date(doc.created_at).toLocaleDateString()}`,
+                  doc.deleted_at && `deleted ${new Date(doc.deleted_at).toLocaleDateString()}`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               />
             </ListItem>
           ))}
         </List>
       ) : (
         <Typography variant="body2" sx={{ color: 'text.secondary', mt: 3, textAlign: 'center' }}>
-          No documents uploaded yet.
+          {showDeleted ? 'No documents uploaded yet.' : 'No documents.'}
         </Typography>
       )}
 
       <ConfirmDialog
         open={!!toDelete}
         title="Delete document?"
-        message={`"${toDelete?.file_name}" will be removed from this employee's documents.`}
+        message={`"${toDelete?.file_name}" will be hidden from this employee's documents. It is kept, and can still be seen with Show deleted.`}
         confirmLabel="Delete"
         destructive
         onConfirm={softDelete}

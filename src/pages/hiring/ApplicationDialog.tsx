@@ -9,6 +9,7 @@ import {
   Dialog,
   Divider,
   IconButton,
+  InputAdornment,
   Link as MuiLink,
   MenuItem,
   Stack,
@@ -36,7 +37,16 @@ import {
   formatDayTime,
   formatPkr,
 } from '../../lib/constants'
-import { NEEDS_REASON, NEEDS_TEXT, NEXT_STAGES, canMoveFrom, hireError, undoableMove, type BoardApplication } from '../../lib/hiring'
+import {
+  NEEDS_REASON,
+  NEEDS_TEXT,
+  NEXT_STAGES,
+  canMoveFrom,
+  hireError,
+  undoableMove,
+  type ApplicationHrDetails,
+  type BoardApplication,
+} from '../../lib/hiring'
 import type { ApplicationStage, ApplicationStageEvent, DirectoryEntry, Onboarding } from '../../lib/types'
 
 // Long enough to read a CV without the viewer's link expiring.
@@ -74,7 +84,12 @@ export default function ApplicationDialog({
   const theme = useTheme()
   const narrow = useMediaQuery(theme.breakpoints.down('md'))
   const [cvUrl, setCvUrl] = useState<string | null>(null)
-  const [salary, setSalary] = useState<number | null>(null)
+  // Null unless the viewer is HR or the job's hiring manager.
+  const [details, setDetails] = useState<ApplicationHrDetails | null>(null)
+  // HR's edits to the current salary and notes.
+  const [currentSalary, setCurrentSalary] = useState('')
+  const [hrNotes, setHrNotes] = useState('')
+  const [savingDetails, setSavingDetails] = useState(false)
   const [events, setEvents] = useState<ApplicationStageEvent[]>([])
   const [error, setError] = useState<string | null>(null)
   const [to, setTo] = useState<ApplicationStage | ''>('')
@@ -102,7 +117,7 @@ export default function ApplicationDialog({
 
   useEffect(() => {
     setCvUrl(null)
-    setSalary(null)
+    setDetails(null)
     supabase.storage
       .from(APPLICATIONS_BUCKET)
       .createSignedUrl(a.resume_path, CV_URL_SECONDS)
@@ -110,10 +125,15 @@ export default function ApplicationDialog({
         if (urlError || !data) setError(urlError?.message ?? 'Could not open the CV.')
         else setCvUrl(data.signedUrl)
       })
-    // Null unless the viewer is HR or the job's hiring manager.
-    supabase.rpc('application_salary', { p_application_id: a.id }).then(({ data }) => {
-      setSalary(typeof data === 'number' ? data : null)
-    })
+    // No row unless the viewer is HR or the job's hiring manager.
+    supabase
+      .rpc('application_hr_details', { p_application_id: a.id })
+      .maybeSingle<ApplicationHrDetails>()
+      .then(({ data }) => {
+        setDetails(data ?? null)
+        setCurrentSalary(data?.current_salary?.toString() ?? '')
+        setHrNotes(data?.hr_notes ?? '')
+      })
   }, [a.id, a.resume_path])
 
   // Reloads when the stage changes, whoever moved it.
@@ -163,6 +183,28 @@ export default function ApplicationDialog({
     setBusy(false)
     if (moveError) return setError(to === 'hired' ? hireError(moveError) : moveError.message)
     await onMoved(to)
+  }
+
+  const detailsChanged =
+    !!details &&
+    (currentSalary.trim() !== (details.current_salary?.toString() ?? '') ||
+      hrNotes.trim() !== (details.hr_notes ?? ''))
+
+  async function saveDetails() {
+    const salary = currentSalary.trim()
+    if (salary && !/^\d+$/.test(salary)) return setError('Enter the current salary as a whole number of rupees.')
+    setSavingDetails(true)
+    setError(null)
+    const next = { current_salary: salary ? Number(salary) : null, hr_notes: hrNotes.trim() || null }
+    const { error: saveError } = await supabase.rpc('application_set_hr_details', {
+      p_application_id: a.id,
+      p_current_salary: next.current_salary,
+      p_hr_notes: next.hr_notes,
+    })
+    setSavingDetails(false)
+    if (saveError) return setError(saveError.message)
+    setDetails((d) => d && { ...d, ...next })
+    setHrNotes(next.hr_notes ?? '')
   }
 
   async function undoMove() {
@@ -215,9 +257,14 @@ export default function ApplicationDialog({
             <Fact icon={<PhoneOutlinedIcon fontSize="small" />}>
               <MuiLink href={`tel:${a.phone}`}>{a.phone}</MuiLink>
             </Fact>
-            {salary !== null && (
+            {details?.current_salary != null && (
               <Fact icon={<PaymentsOutlinedIcon fontSize="small" />}>
-                <span aria-label="Expected salary">{formatPkr(salary)}</span> / month expected
+                <span aria-label="Current salary">{formatPkr(details.current_salary)}</span> / month current
+              </Fact>
+            )}
+            {details?.expected_salary != null && (
+              <Fact icon={<PaymentsOutlinedIcon fontSize="small" />}>
+                <span aria-label="Expected salary">{formatPkr(details.expected_salary)}</span> / month expected
               </Fact>
             )}
             <Fact icon={<WorkOutlineIcon fontSize="small" />}>{jobTitle}</Fact>
@@ -386,6 +433,63 @@ export default function ApplicationDialog({
             <Alert severity="error" sx={{ mt: 2 }} onClose={() => setError(null)}>
               {error}
             </Alert>
+          )}
+
+          {details && isHr && (
+            <>
+              <Divider sx={{ my: 3 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0 }}>
+                HR notes
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+                Seen by HR and the hiring manager only.
+              </Typography>
+              <Stack
+                component="form"
+                spacing={2}
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  saveDetails()
+                }}
+              >
+                <TextField
+                  label="Current salary"
+                  type="number"
+                  helperText="Per month"
+                  value={currentSalary}
+                  onChange={(e) => setCurrentSalary(e.target.value)}
+                  slotProps={{
+                    input: { startAdornment: <InputAdornment position="start">PKR</InputAdornment> },
+                    htmlInput: { min: 0, step: 1, inputMode: 'numeric' },
+                  }}
+                  fullWidth
+                />
+                <TextField
+                  label="Notes"
+                  multiline
+                  minRows={3}
+                  value={hrNotes}
+                  onChange={(e) => setHrNotes(e.target.value)}
+                  slotProps={{ htmlInput: { maxLength: 5000 } }}
+                  fullWidth
+                />
+                <Button type="submit" variant="outlined" disabled={!detailsChanged} loading={savingDetails}>
+                  Save
+                </Button>
+              </Stack>
+            </>
+          )}
+
+          {details?.hr_notes && !isHr && (
+            <>
+              <Divider sx={{ my: 3 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                HR notes
+              </Typography>
+              <Typography variant="body2" aria-label="HR notes" sx={{ whiteSpace: 'pre-wrap' }}>
+                {details.hr_notes}
+              </Typography>
+            </>
           )}
 
           {a.note && (

@@ -1,7 +1,7 @@
 // Employee records: the list, the form (who may set roles, what is sent, how a
 // delete is ordered) and documents (upload rules, signed links, soft delete).
 import {
-  setupDom, reporter, text, button, click, type, choose, dialog, row, field, valueOf, options, pickFile, settle, waitFor,
+  setupDom, reporter, text, button, checkbox, click, type, choose, dialog, row, field, valueOf, options, pickFile, settle, waitFor,
 } from './setup'
 setupDom()
 
@@ -10,6 +10,7 @@ const { reset, signInAs, captured, failNext, table, PEOPLE } = await import('./m
 
 const { check, done } = reporter()
 
+const tab = (label: string) => [...document.querySelectorAll('[role="tab"]')].find((t) => t.textContent === label)
 const keys = (o: object | undefined) => JSON.stringify(Object.keys(o ?? {}).sort())
 
 // ============================== the list ==============================
@@ -40,9 +41,15 @@ check('…nor the company email, which is the login',
   field('Company email')?.querySelector('input')?.disabled === true &&
   !!field('Company email')?.textContent?.includes('Only a company admin can change this'))
 check('HR is not offered delete', !button('Delete employee'))
-// The documents panel loads after the form, with no spinner of its own.
+check('the record opens on its details', tab('Details')?.getAttribute('aria-selected') === 'true' &&
+  !text().includes('cnic.pdf'))
+await click(tab('Documents'))
+check('documents have their own tab, kept in the URL', location.search === '?tab=documents', location.search)
+// The documents panel has no spinner of its own.
 check('her documents are listed, but not the deleted one',
   (await waitFor(() => text().includes('cnic.pdf'))) && !text().includes('old-photo.png'))
+await click(tab('Details'))
+check('…and back to the details', !!valueOf('Full name') && location.search === '', location.search)
 
 await type('Phone number', ' 0300 1234567 ')
 await click(button('Save changes'))
@@ -69,7 +76,8 @@ check('only the new department\'s designations are offered',
 reset()
 signInAs(PEOPLE.hr)
 await mountApp('/employees/new')
-check('documents wait until the record exists', text().includes('Documents can be uploaded after the employee is created'))
+check('documents wait until the record exists',
+  text().includes('Documents can be uploaded after the employee is created') && !tab('Documents'))
 await type('Full name', '  Zara Ali ')
 await type('Company email', 'zara@elevancelabs.com')
 await type('Date of joining', '2026-07-01')
@@ -123,8 +131,9 @@ await click(button('Delete employee'))
 check('delete asks first', dialog()?.textContent?.includes('Sara Iqbal and all their documents will be permanently deleted'))
 await click(button('Delete', dialog()!))
 // (The list it goes back to then reads its own data.)
-check('delete removes the files first, then the record',
-  captured.calls.slice(0, 3).join() === 'employee_documents.select,storage.remove,employees.delete', captured.calls.join())
+// A file can only be removed once no document row points at it (storage policy).
+check('delete removes the record first, then its files',
+  captured.calls.slice(0, 3).join() === 'employee_documents.select,employees.delete,storage.remove', captured.calls.join())
 check('…every file, the hidden ones too',
   JSON.stringify(captured.removals) === JSON.stringify([{ bucket: 'employee-docs', paths: ['e-sara/1111.pdf', 'e-sara/2222.png'] }]),
   JSON.stringify(captured.removals))
@@ -133,18 +142,28 @@ check('…and goes back to the list', await waitFor(() => location.pathname === 
 reset()
 signInAs(PEOPLE.companyAdmin)
 await mountApp('/employees/e-sara')
+failNext('employees.delete', { message: 'Permission denied' })
+await click(button('Delete employee'))
+await click(button('Delete', dialog()!))
+check('if the record cannot be deleted, its files are kept', !captured.removals.length)
+check('…and the error is shown', text().includes('Permission denied'))
+
+reset()
+signInAs(PEOPLE.companyAdmin)
+await mountApp('/employees/e-sara')
 failNext('storage.remove', { message: 'Storage is unavailable' })
 await click(button('Delete employee'))
 await click(button('Delete', dialog()!))
-check('if the files cannot be removed, the record is kept',
-  !captured.deletes.some((d) => d.table === 'employees') && table('employees').some((e) => e.id === 'e-sara'))
-check('…and the error is shown', text().includes('Storage is unavailable'))
+check('once the record is gone, a failed file removal still goes back to the list',
+  !table('employees').some((e) => e.id === 'e-sara') && (await waitFor(() => location.pathname === '/employees')),
+  location.pathname)
 
 // ============================== documents ==============================
 
 reset()
 signInAs(PEOPLE.hr)
-await mountApp('/employees/e-sara')
+await mountApp('/employees/e-sara?tab=documents')
+check('a link straight to the Documents tab opens it', tab('Documents')?.getAttribute('aria-selected') === 'true')
 const docRead = captured.selects.find((s) => s.table === 'employee_documents')
 check('documents are read for this employee, hiding deleted ones',
   JSON.stringify(docRead?.filters) === JSON.stringify([['employee_id', 'eq', 'e-sara'], ['deleted_at', 'is', null]]),
@@ -177,7 +196,7 @@ check('the list reloads with it', await waitFor(() => text().includes('Offer.PDF
 
 reset()
 signInAs(PEOPLE.hr)
-await mountApp('/employees/e-sara')
+await mountApp('/employees/e-sara?tab=documents')
 failNext('storage.upload', { message: 'Bucket quota exceeded' } as never)
 await pickFile(fileOf('scan.pdf', 'application/pdf', 1000))
 await click(button('Upload'))
@@ -199,5 +218,27 @@ check('deleting a document only hides it', keys(softDelete?.values) === '["delet
   JSON.stringify(softDelete))
 check('…that document', JSON.stringify(softDelete?.filters) === JSON.stringify([['id', 'eq', 'doc-1']]))
 check('…and it leaves the list', await waitFor(() => !text().includes('cnic.pdf')))
+check('there is no way to delete a document for good',
+  !captured.deletes.some((d) => d.table === 'employee_documents') && !captured.removals.length)
+
+// ---------------- show deleted ----------------
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/employees/e-sara?tab=documents')
+await waitFor(() => text().includes('cnic.pdf'))
+const showDeleted = () => checkbox('Show deleted') as HTMLInputElement | undefined
+const item = (name: string) => [...document.querySelectorAll('li')].find((li) => li.textContent?.includes(name))
+check('deleted documents are hidden by default', showDeleted()?.checked === false && !text().includes('old-photo.png'))
+captured.selects.length = 0
+await click(showDeleted())
+const allRead = captured.selects.find((s) => s.table === 'employee_documents')
+check('Show deleted reads them all for this employee',
+  JSON.stringify(allRead?.filters) === JSON.stringify([['employee_id', 'eq', 'e-sara']]), JSON.stringify(allRead?.filters))
+check('…and lists the deleted one, marked as such',
+  (await waitFor(() => text().includes('old-photo.png'))) && !!item('old-photo.png')?.textContent?.includes('Deleted'))
+check('a deleted document can still be viewed', !!button('View', item('old-photo.png')!))
+check('…but not deleted again', !button('Delete', item('old-photo.png')!) && !!button('Delete', item('cnic.pdf')!))
+await click(showDeleted())
+check('turning it off hides it again', await waitFor(() => !text().includes('old-photo.png')))
 
 done()
