@@ -1,11 +1,46 @@
-import { Alert, Box, Button, Card, CardContent, Stack, Typography } from '@mui/material'
+import { useState, type FormEvent } from 'react'
+import { Alert, Box, Button, Card, CardContent, Divider, Stack, TextField, Typography } from '@mui/material'
 import GoogleIcon from '@mui/icons-material/Google'
 import { useAuth } from '../auth/AuthProvider'
 import { Logo } from '../components/common'
 import { COMPANY_DOMAIN } from '../lib/constants'
+import { supabase } from '../lib/supabase'
 
 export default function Login() {
-  const { signIn, error } = useAuth()
+  const { signIn, signInWithPassword, error } = useAuth()
+  // Password logins are for the few people without a company Google account,
+  // so the form stays folded away behind a link.
+  const [withPassword, setWithPassword] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<{ severity: 'info' | 'error'; text: string } | null>(null)
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    setNotice(null)
+    setBusy(true)
+    await signInWithPassword(email, password)
+    setBusy(false)
+  }
+
+  async function sendReset() {
+    if (!email.trim()) return setNotice({ severity: 'error', text: 'Enter your email first.' })
+    setBusy(true)
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo: window.location.origin + window.location.pathname,
+    })
+    setBusy(false)
+    setNotice(
+      resetError
+        ? { severity: 'error', text: resetError.message }
+        : {
+            severity: 'info',
+            // PKCE: the link only works in the browser that asked for it.
+            text: 'If that address has a password login, a reset link is on its way. Open it in this browser.',
+          },
+    )
+  }
 
   return (
     <Box
@@ -37,6 +72,42 @@ export default function Login() {
             >
               Sign in with Google
             </Button>
+            <Divider flexItem>or</Divider>
+            {withPassword ? (
+              <Stack component="form" spacing={2} onSubmit={submit} sx={{ width: '100%' }}>
+                {notice && (
+                  <Alert severity={notice.severity} sx={{ textAlign: 'left' }}>
+                    {notice.text}
+                  </Alert>
+                )}
+                <TextField
+                  label="Email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  fullWidth
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+                <TextField
+                  label="Password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  fullWidth
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <Button type="submit" variant="outlined" size="large" fullWidth disabled={busy}>
+                  Sign in
+                </Button>
+                <Button size="small" onClick={sendReset} disabled={busy}>
+                  Forgot password?
+                </Button>
+              </Stack>
+            ) : (
+              <Button onClick={() => setWithPassword(true)}>Sign in with email and password</Button>
+            )}
           </Stack>
         </CardContent>
       </Card>

@@ -24,8 +24,8 @@ behaviour).
   (departments, designations, KPIs, expectations, holidays, announcements, branding), and
   **configuration** (the onboarding and offboarding checklists, vendors).
 - Stack: **React 19 + Vite + MUI + TypeScript** on the front, **Supabase**
-  (Postgres + RLS, Auth, Storage) behind it. No backend of our own, no Edge
-  Functions yet.
+  (Postgres + RLS, Auth, Storage) behind it. No backend of our own; one Edge
+  Function (`set-password`, deployed by hand).
 - Deployed as a static SPA to **GitHub Pages**; `HashRouter` so no rewrites are
   needed.
 
@@ -40,10 +40,13 @@ behaviour).
   (`job_posting`, `public_branding`, `submit_application`) and adding a PDF to
   an open job's CV folder; keep them that narrow. Employee data is sensitive (CNIC, bank, IBAN, DOB) — only
   HR sees full records; everyone else goes through `employee_directory`.
-- **Login is bound by company email.** An auth user is linked to the employee
-  row whose `company_email` matches, and only while that row's status may log
-  in. Anything that changes emails, statuses or roles must keep that binding
-  safe (see the `employees_guard` trigger).
+- **Login is bound by company email and sign-in method.** An auth user is
+  linked to the employee row whose `company_email` matches and whose
+  `login_method` matches the session's provider (Google on the company domain,
+  or a confirmed email/password user on an outside address), and only while
+  that row's status may log in. Anything that changes emails, methods,
+  statuses or roles must keep that binding safe (see the `employees_guard`
+  trigger).
 - **Business rules live in triggers too** (role changes, document stamping, org
   chart cycles, leave quotas/overlaps/approval). Client-side checks are a
   convenience, never the only guard.
@@ -110,6 +113,7 @@ behaviour).
 | `src/auth/` | `AuthProvider` — session, employee binding, role flags. |
 | `src/lib/` | Supabase client, domain types, constants/formatters, company-config helpers. |
 | `supabase/migrations/` | Ordered, timestamped changes, applied by `supabase db push`. |
+| `supabase/functions/` | Edge Functions (Deno), deployed by hand with `supabase functions deploy`; the only code that holds the service role key. |
 | `supabase/schema.sql` | The **whole current database** in one file. Kept in step with the migrations. |
 | `scripts/check-schema.sh` | Proves `schema.sql` equals the migrations (`yarn check:schema`). |
 | `test/` | Behaviour tests: plain scripts run by `vite-node` in jsdom against an in-memory Supabase mock. |
@@ -119,8 +123,8 @@ behaviour).
 
 - `/careers/:id` — **public**, matched in `src/App.tsx` before the sign-in
   gate: an open job, the application form and branding. Uses no session.
-- Otherwise no session → `Login` (Google only); no other routes exist until
-  signed in.
+- Otherwise no session → `Login` (Google; email and password, with a reset
+  link, for password logins); no other routes exist until signed in.
 - `/dashboard` — everyone; the landing page. Performance reminders (reviews
   to submit, own reviews and HR feedback to acknowledge, peer reviews to
   write, feedback on one's manager while open, HR: a quarter with no peer
@@ -143,8 +147,8 @@ behaviour).
 - `/employees/new`, `/employees/:id` — `EmployeeForm`: create/edit a record;
   on edit, tabs *Details* and *Documents* (tab in `?tab=`; deleted documents
   behind *Show deleted*). Roles, and on edit the company email, are only sent
-  by company admins; delete is
-  company-admin only.
+  by company admins, as is the sign-in method; delete and, for a password
+  login, *Set password* are company-admin only.
 - `/org-chart` — everyone. Reads `employee_directory`; HR can place, move and
   remove people.
 - `/performance` — everyone; tabs in `?tab=`: *Me* (own submitted reviews as
@@ -204,7 +208,7 @@ behaviour).
 
 | Provider | Supplies | Scope |
 |---|---|---|
-| `AuthProvider` | `loading`, `employee`, `error`, `isHr`, `isCompanyAdmin`, `isFinance`, `canManagePayroll`, `canManageOperations`, `isManager`, `isHiringTeam`, `signIn`, `signOut` | Whole app |
+| `AuthProvider` | `loading`, `employee`, `error`, `isHr`, `isCompanyAdmin`, `isFinance`, `canManagePayroll`, `canManageOperations`, `isManager`, `isHiringTeam`, `recovering`, `endRecovery`, `signIn`, `signInWithPassword`, `signOut` | Whole app |
 
 - A Supabase session alone is not a login: after sign-in the provider calls
   `bind_employee`; no row back → error shown and the user is signed out.
@@ -254,6 +258,8 @@ behaviour).
 - `equipment.ts` — equipment select (named vendor FK), vendor select with
   equipment count, IBAN normalising, equipment-bucket upload / remove, error
   messages.
+- `passwordLogin.ts` — password minimum (mirror of the function's), the
+  password generator, and calling `set-password` with its error message.
 - `guides.ts` — guide select, function summaries, and turning a Google
   Docs / Sheets / Slides link into its embeddable address.
 - `richText.ts` — DOMPurify allow-list sanitiser and styles shared by the
@@ -261,7 +267,8 @@ behaviour).
 - `company.tsx` — helpers for the config pages: embedded-count reading, the
   designation-with-department select (names the FK explicitly), sorting, the
   designation picker's options, and mapping Postgres error codes to messages.
-- `components/Layout.tsx` — app bar, role-filtered nav drawer, account menu.
+- `components/Layout.tsx` — app bar, role-filtered nav drawer, account menu
+  (password logins: change password, also opened by a reset link).
 - `components/Documents.tsx` — an employee's document list: upload to the
   private bucket, open via signed URL, soft delete, *Show deleted* toggle.
 - `components/Leaves.tsx` — leave status chip, approval progress, balance
@@ -295,10 +302,12 @@ Full detail in `supabase/schema.sql`.
   (`is_hr`); Finance = finance admin or company admin (`is_finance`); payroll
   = either (`can_manage_payroll`), and so are equipment and vendors
   (`can_manage_operations`). A finance admin is otherwise a member.
-  Only a company admin may assign or change a role, or change a company
-  email (trigger).
+  Only a company admin may assign or change a role, change a company
+  email, or set or change the sign-in method (trigger).
 - `employees` — the person and their login. `employee_number` from a sequence,
-  `user_id` set only by `bind_employee`; neither is client-writable. Statuses
+  `user_id` set only by `bind_employee`; neither is client-writable.
+  `login_method` (`google`, the default: company domain only; `password`:
+  an outside address only, check constraint). Statuses
   `probation` / `active` / `notice_period` may log in (`is_login_status`).
   Linked to a department and a designation (both optional; a designation needs
   its department, and the FK keeps them consistent). HR reads/writes all; a
@@ -460,13 +469,23 @@ Full detail in `supabase/schema.sql`.
   department/designation) for every logged-in employee. Bypasses employee RLS
   on purpose and gates on the caller being bound.
 - `hook_before_user_created` — optional auth hook that refuses sign-up without
-  a matching record.
+  a matching login-eligible record (any domain; `bind_employee` checks the
+  method).
+- `auth_user_ids_by_email` — service role only: lets `set-password` find an
+  address's auth users.
+- `set-password` (Edge Function) — company admins (`is_company_admin` as the
+  caller) set a password-method employee's password: any auth user with that
+  address is deleted and made again, confirmed, with the new password (ends
+  its sessions; the row rebinds at next sign-in).
 
 ## 8. How things connect
 
-- Sign-in: Google OAuth (PKCE) → `AuthProvider` sees a session → RPC
-  `bind_employee` links auth user ↔ employee by company email → app renders
-  with role flags.
+- Sign-in: Google OAuth (PKCE), or email and password for a password login
+  (user made by a company admin's *Set password*, via `set-password`) →
+  `AuthProvider` sees a
+  session → RPC `bind_employee` links auth user ↔ employee by company email
+  and method → app renders with role flags. A reset link (PKCE, same
+  browser) signs in and fires `PASSWORD_RECOVERY` → set a new password.
 - Document upload: storage upload → `employee_documents` insert (trigger stamps
   `uploaded_by`). Delete in the app = set `deleted_at` (trigger stamps
   `deleted_by`).

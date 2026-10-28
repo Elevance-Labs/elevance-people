@@ -6,6 +6,7 @@ import {
   Button,
   CircularProgress,
   Grid,
+  InputAdornment,
   MenuItem,
   Paper,
   Snackbar,
@@ -19,15 +20,17 @@ import {
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined'
 import { useAuth } from '../auth/AuthProvider'
 import Documents from '../components/Documents'
-import { ConfirmDialog, PageHeader, PersonAvatar, StatusChip } from '../components/common'
+import { ConfirmDialog, FormDialog, PageHeader, PersonAvatar, StatusChip } from '../components/common'
 import { DOCS_BUCKET, supabase } from '../lib/supabase'
 import {
   APP_ROLE_LABELS,
   COMPANY_DOMAIN,
   EMPLOYMENT_TYPE_LABELS,
+  LOGIN_METHOD_LABELS,
   STATUS_LABELS,
   formatEmployeeNumber,
 } from '../lib/constants'
+import { PASSWORD_MIN_LENGTH, generatePassword, setEmployeePassword } from '../lib/passwordLogin'
 import type { Department, Designation, Employee } from '../lib/types'
 
 const EMPTY = {
@@ -48,6 +51,7 @@ const EMPTY = {
   employment_type: 'full_time',
   status: 'joining',
   app_role: 'member',
+  login_method: 'google',
 }
 type FormState = typeof EMPTY
 type FieldName = keyof FormState
@@ -65,10 +69,12 @@ function toPayload(form: FormState) {
   return payload
 }
 
-function friendlyError(error: { code?: string; message: string }) {
+function friendlyError(error: { code?: string; message: string }, form: FormState) {
   if (error.code === '23505') return 'An employee with this company email already exists.'
   if (error.code === '23514' && error.message.includes('company_email'))
-    return `Company email must be an @${COMPANY_DOMAIN} address.`
+    return form.login_method === 'password'
+      ? `A password login needs an address outside @${COMPANY_DOMAIN}.`
+      : `Company email must be an @${COMPANY_DOMAIN} address.`
   if (error.message.includes('employees_designation')) return 'Pick a designation from the selected department.'
   return error.message
 }
@@ -140,6 +146,7 @@ export default function EmployeeForm() {
   const departmentName = (departmentId: string | null) => departments.find((d) => d.id === departmentId)?.name
   const designationTitle = (designationId: string | null) => designations.find((d) => d.id === designationId)?.title
   const departmentDesignations = designations.filter((d) => d.department_id === form.department_id)
+  const password = form.login_method === 'password'
 
   useEffect(() => {
     if (!id) {
@@ -178,10 +185,12 @@ export default function EmployeeForm() {
     setBusy(true)
     setError(null)
     const payload = toPayload(form)
-    // Only company admins may set roles, or change a company email (it is the
-    // login); leave those columns out so the DB guard isn't tripped.
+    // Only company admins may set roles or the sign-in method, or change a
+    // company email (it is the login); leave those columns out so the DB
+    // guard isn't tripped.
     if (!isCompanyAdmin) {
       delete payload.app_role
+      delete payload.login_method
       if (id) delete payload.company_email
     }
 
@@ -192,7 +201,7 @@ export default function EmployeeForm() {
       .select()
       .single()
     setBusy(false)
-    if (saveError) return setError(friendlyError(saveError))
+    if (saveError) return setError(friendlyError(saveError, form))
 
     if (id) {
       setEmployee(data as Employee)
@@ -296,21 +305,38 @@ export default function EmployeeForm() {
                 </Cell>
                 <Cell>
                   <TextField
-                    {...field('company_email', 'Company email', {
+                    {...field('company_email', password ? 'Login email' : 'Company email', {
                       required: true,
                       type: 'email',
-                      placeholder: `name@${COMPANY_DOMAIN}`,
+                      placeholder: password ? 'name@example.com' : `name@${COMPANY_DOMAIN}`,
                       // It is the login, so once the record exists only a company admin changes it.
                       disabled: !!id && !isCompanyAdmin,
                       helperText: id && !isCompanyAdmin ? 'Only a company admin can change this' : undefined,
                       slotProps: {
-                        htmlInput: {
-                          pattern: `.+@${COMPANY_DOMAIN.replace('.', '\\.')}`,
-                          title: `Must be an @${COMPANY_DOMAIN} address`,
-                        },
+                        htmlInput: password
+                          ? {}
+                          : {
+                              pattern: `.+@${COMPANY_DOMAIN.replace('.', '\\.')}`,
+                              title: `Must be an @${COMPANY_DOMAIN} address`,
+                            },
                       },
                     })}
                   />
+                </Cell>
+                <Cell>
+                  <TextField
+                    {...field('login_method', 'Sign-in', {
+                      select: true,
+                      disabled: !isCompanyAdmin,
+                      helperText: !isCompanyAdmin
+                        ? 'Only a company admin can change this'
+                        : password
+                          ? 'For someone without a company Google account. Save, then set their password.'
+                          : undefined,
+                    })}
+                  >
+                    {options(LOGIN_METHOD_LABELS)}
+                  </TextField>
                 </Cell>
                 <Cell>
                   <TextField
@@ -466,6 +492,10 @@ export default function EmployeeForm() {
             </Stack>
           </Box>
 
+          {employee && isCompanyAdmin && employee.login_method === 'password' && (
+            <PasswordLogin employee={employee} />
+          )}
+
           {!employee && (
             <Alert severity="info" variant="outlined">
               Documents can be uploaded after the employee is created.
@@ -492,5 +522,87 @@ export default function EmployeeForm() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       />
     </Box>
+  )
+}
+
+// Company admins: set (or reset) a password login's password. The first time
+// this also creates their user; after that it replaces it, signing them out.
+function PasswordLogin({ employee }: { employee: Employee }) {
+  const [open, setOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
+
+  function start() {
+    setPassword(generatePassword())
+    setError(null)
+    setDone(false)
+    setOpen(true)
+  }
+
+  async function save() {
+    if (password.length < PASSWORD_MIN_LENGTH) return setError(`Use at least ${PASSWORD_MIN_LENGTH} characters.`)
+    setBusy(true)
+    setError(null)
+    const saveError = await setEmployeePassword(employee.id, password)
+    setBusy(false)
+    if (saveError) return setError(saveError)
+    setOpen(false)
+    setDone(true)
+  }
+
+  return (
+    <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { sm: 'center' } }}>
+        <Box sx={{ flexGrow: 1 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            Password login
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            They sign in with {employee.company_email} and a password. Setting a new one replaces the old one and signs
+            them out everywhere.
+          </Typography>
+        </Box>
+        <Button variant="outlined" onClick={start}>
+          Set password
+        </Button>
+      </Stack>
+      {done && (
+        <Alert severity="success" sx={{ mt: 2 }} onClose={() => setDone(false)}>
+          Password set. Send it to them through a different channel than their email, and ask them to change it after
+          they sign in.
+        </Alert>
+      )}
+      <FormDialog
+        open={open}
+        title={`Set password for ${employee.full_name}`}
+        submitLabel="Set password"
+        error={error}
+        busy={busy}
+        onSubmit={save}
+        onClose={() => setOpen(false)}
+      >
+        <TextField
+          label="New password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          autoComplete="off"
+          helperText="Copy it before you set it: it is not shown again."
+          slotProps={{
+            input: {
+              endAdornment: (
+                <InputAdornment position="end">
+                  <Button size="small" onClick={() => setPassword(generatePassword())} disabled={busy}>
+                    Generate
+                  </Button>
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
+      </FormDialog>
+    </Paper>
   )
 }

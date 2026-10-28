@@ -14,6 +14,7 @@ import {
   ListSubheader,
   Menu,
   MenuItem,
+  TextField,
   Toolbar,
   Typography,
   useMediaQuery,
@@ -32,6 +33,7 @@ import EventAvailableOutlinedIcon from '@mui/icons-material/EventAvailableOutlin
 import EventNoteOutlinedIcon from '@mui/icons-material/EventNoteOutlined'
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import KeyOutlinedIcon from '@mui/icons-material/KeyOutlined'
 import HowToRegOutlinedIcon from '@mui/icons-material/HowToRegOutlined'
 import PersonRemoveOutlinedIcon from '@mui/icons-material/PersonRemoveOutlined'
 import PlaylistRemoveOutlinedIcon from '@mui/icons-material/PlaylistRemoveOutlined'
@@ -51,8 +53,9 @@ import ViewKanbanOutlinedIcon from '@mui/icons-material/ViewKanbanOutlined'
 import WorkOutlineIcon from '@mui/icons-material/WorkOutlined'
 import { useAuth } from '../auth/AuthProvider'
 import { APP_ROLE_LABELS } from '../lib/constants'
+import { PASSWORD_MIN_LENGTH } from '../lib/passwordLogin'
 import { supabase } from '../lib/supabase'
-import { Logo, PersonAvatar } from './common'
+import { FormDialog, Logo, PersonAvatar } from './common'
 
 const DRAWER_WIDTH = 248
 
@@ -154,13 +157,24 @@ const NAV: NavSection[] = [
 ]
 
 export default function Layout() {
-  const { employee, isHr, isCompanyAdmin, isManager, isHiringTeam, canManagePayroll, canManageOperations, signOut } =
-    useAuth()
+  const {
+    employee,
+    isHr,
+    isCompanyAdmin,
+    isManager,
+    isHiringTeam,
+    canManagePayroll,
+    canManageOperations,
+    recovering,
+    endRecovery,
+    signOut,
+  } = useAuth()
   const theme = useTheme()
   const desktop = useMediaQuery(theme.breakpoints.up('md'))
   const { pathname } = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [userMenu, setUserMenu] = useState<HTMLElement | null>(null)
+  const [changingPassword, setChangingPassword] = useState(false)
   const [designation, setDesignation] = useState<string | null>(null)
   const designationId = employee?.designation_id
 
@@ -285,6 +299,19 @@ export default function Layout() {
               </Typography>
             </Box>
             <Divider />
+            {employee.login_method === 'password' && (
+              <MenuItem
+                onClick={() => {
+                  setUserMenu(null)
+                  setChangingPassword(true)
+                }}
+              >
+                <ListItemIcon>
+                  <KeyOutlinedIcon fontSize="small" />
+                </ListItemIcon>
+                Change password
+              </MenuItem>
+            )}
             <MenuItem
               onClick={() => {
                 setUserMenu(null)
@@ -314,6 +341,63 @@ export default function Layout() {
         <Toolbar />
         <Outlet />
       </Box>
+
+      {(changingPassword || recovering) && (
+        <PasswordDialog
+          recovering={recovering}
+          onClose={() => {
+            setChangingPassword(false)
+            endRecovery()
+          }}
+        />
+      )}
     </Box>
+  )
+}
+
+// Only password logins have a password to change; a reset link lands here too.
+function PasswordDialog({ recovering, onClose }: { recovering: boolean; onClose: () => void }) {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function save() {
+    if (password.length < PASSWORD_MIN_LENGTH) return setError(`Use at least ${PASSWORD_MIN_LENGTH} characters.`)
+    if (password !== confirm) return setError('The passwords do not match.')
+    setBusy(true)
+    setError(null)
+    const { error: saveError } = await supabase.auth.updateUser({ password })
+    setBusy(false)
+    if (saveError) return setError(saveError.message)
+    onClose()
+  }
+
+  return (
+    <FormDialog
+      open
+      title={recovering ? 'Set a new password' : 'Change password'}
+      error={error}
+      busy={busy}
+      onSubmit={save}
+      onClose={onClose}
+    >
+      <TextField
+        label="New password"
+        type="password"
+        autoComplete="new-password"
+        required
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      <TextField
+        label="Confirm new password"
+        type="password"
+        autoComplete="new-password"
+        required
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+      />
+    </FormDialog>
   )
 }

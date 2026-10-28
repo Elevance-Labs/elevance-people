@@ -19,13 +19,18 @@ interface AuthState {
   isManager: boolean
   // Hiring manager or interviewer on any job, so sees its applications. Read at sign-in.
   isHiringTeam: boolean
+  // Came in through a password reset link, so should set a new password now.
+  recovering: boolean
+  endRecovery: () => void
   signIn: () => Promise<void>
+  // For password logins: people without a company Google account.
+  signInWithPassword: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthState | null>(null)
 
-const NOT_ALLOWED = `Sign-in refused. You need an @${COMPANY_DOMAIN} Google account with an active employee record. Contact HR if you think this is a mistake.`
+const NOT_ALLOWED = `Sign-in refused. You need an @${COMPANY_DOMAIN} Google account, or a password login set up for you, with an active employee record. Contact HR if you think this is a mistake.`
 
 // Supabase reports OAuth failures as error_description in the query string or hash.
 function readOAuthError(): string | null {
@@ -44,9 +49,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isHiringTeam, setIsHiringTeam] = useState(false)
   const [binding, setBinding] = useState(false)
   const [error, setError] = useState<string | null>(readOAuthError)
+  const [recovering, setRecovering] = useState(false)
 
   useEffect(() => {
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true)
+      if (event === 'SIGNED_OUT') setRecovering(false)
       setUserId(session?.user.id ?? null)
       setSessionReady(true)
     })
@@ -105,6 +113,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canManageOperations: role === 'hr_admin' || role === 'finance_admin' || role === 'company_admin',
       isManager,
       isHiringTeam,
+      recovering,
+      endRecovery: () => setRecovering(false),
       signIn: async () => {
         setError(null)
         const { error: signInError } = await supabase.auth.signInWithOAuth({
@@ -117,11 +127,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })
         if (signInError) setError(signInError.message)
       },
+      signInWithPassword: async (email, password) => {
+        setError(null)
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: email.trim().toLowerCase(),
+          password,
+        })
+        if (signInError) setError(signInError.message)
+      },
       signOut: async () => {
         await supabase.auth.signOut()
       },
     }),
-    [sessionReady, binding, userId, employee, role, isManager, isHiringTeam, error],
+    [sessionReady, binding, userId, employee, role, isManager, isHiringTeam, error, recovering],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

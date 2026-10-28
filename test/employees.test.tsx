@@ -6,7 +6,7 @@ import {
 setupDom()
 
 const { mountApp, location } = await import('./app')
-const { reset, signInAs, captured, failNext, table, PEOPLE } = await import('./mockSupabase')
+const { reset, signInAs, captured, failNext, table, PEOPLE, FINANCE } = await import('./mockSupabase')
 
 const { check, done } = reporter()
 
@@ -86,6 +86,7 @@ const created = captured.inserts.find((i) => i.table === 'employees')?.rows[0]
 check('creating sends the record trimmed', created?.full_name === 'Zara Ali' && created?.company_email === 'zara@elevancelabs.com',
   JSON.stringify(created))
 check('HR creating sends no role', !!created && !('app_role' in created), keys(created))
+check('…nor a sign-in method, so it is Google', !!created && !('login_method' in created), keys(created))
 check('…and never the login or the number', !!created && !('user_id' in created) && !('employee_number' in created))
 check('after creating, the new record opens', await waitFor(() => location.pathname.startsWith('/employees/new-')),
   location.pathname)
@@ -110,6 +111,7 @@ await type('Company email', 'zara@gmail.com')
 await type('Date of joining', '2026-07-01')
 await click(button('Create employee'))
 check('the form refuses an email outside the company domain', !captured.inserts.some((i) => i.table === 'employees'))
+check('HR cannot set up a password login', field('Sign-in')?.querySelector('[role="combobox"]')?.getAttribute('aria-disabled') === 'true')
 
 // ============================== the form, as company admin ==============================
 
@@ -138,6 +140,67 @@ check('…every file, the hidden ones too',
   JSON.stringify(captured.removals) === JSON.stringify([{ bucket: 'employee-docs', paths: ['e-sara/1111.pdf', 'e-sara/2222.png'] }]),
   JSON.stringify(captured.removals))
 check('…and goes back to the list', await waitFor(() => location.pathname === '/employees'), location.pathname)
+
+// ---------------- a password login ----------------
+reset()
+signInAs(PEOPLE.companyAdmin)
+await mountApp('/employees/new')
+check('a new record signs in with Google by default', valueOf('Sign-in') === 'google', valueOf('Sign-in'))
+await choose('Sign-in', 'Email and password')
+check('a password login asks for a login email instead', !!field('Login email') && !field('Company email'))
+await type('Full name', 'Hina Raza')
+await type('Login email', 'Hina@Gmail.com')
+await type('Date of joining', '2026-07-01')
+failNext('employees.insert', { code: '23514', message: 'new row for relation "employees" violates check constraint "employees_company_email_check"' })
+await click(button('Create employee'))
+const passwordRow = captured.inserts.find((i) => i.table === 'employees')?.rows[0]
+check('an outside address is accepted for it, and sent with the method',
+  passwordRow?.company_email === 'hina@gmail.com' && passwordRow?.login_method === 'password', JSON.stringify(passwordRow))
+check('the email check is explained for a password login',
+  text().includes('A password login needs an address outside @elevancelabs.com.'), text().slice(0, 300))
+
+// ---------------- setting a password login's password ----------------
+const withPasswordLogin = () =>
+  table('employees').push({ ...FINANCE, company_email: 'hina@gmail.com', login_method: 'password' })
+const passwordInput = () => field('New password', dialog()!)?.querySelector('input')
+
+reset()
+signInAs(PEOPLE.companyAdmin)
+await mountApp('/employees/e-sara')
+check('a Google login has no password to set', !button('Set password'))
+
+reset()
+withPasswordLogin()
+signInAs(PEOPLE.hr)
+await mountApp('/employees/e-hina')
+check('HR cannot set a password', valueOf('Full name') === 'Hina Raza' && !button('Set password'))
+
+reset()
+withPasswordLogin()
+signInAs(PEOPLE.companyAdmin)
+await mountApp('/employees/e-hina')
+check('a company admin can set a password login\'s password', !!button('Set password') && text().includes('hina@gmail.com'))
+await click(button('Set password'))
+const first = passwordInput()?.value ?? ''
+check('the dialog starts with a strong generated password', /^[A-Za-z2-9]{16}$/.test(first) && !/[0O1lI]/.test(first), first)
+await click(button('Generate', dialog()!))
+check('…and Generate makes another', !!passwordInput()?.value && passwordInput()?.value !== first)
+await type('New password', 'short', dialog()!)
+await click(button('Set password', dialog()!))
+check('a short password is refused before anything is sent',
+  dialog()?.textContent?.includes('Use at least 10 characters.') && !captured.functions.length)
+await type('New password', 'a-long-enough-one', dialog()!)
+failNext('functions.set-password', { message: 'Only a company admin can set passwords.' })
+await click(button('Set password', dialog()!))
+check('a refusal from the function is shown as it says',
+  dialog()?.textContent?.includes('Only a company admin can set passwords.'), dialog()?.textContent ?? '')
+await click(button('Set password', dialog()!))
+check('it sends only the employee and the password, to the set-password function',
+  JSON.stringify(captured.functions.at(-1)) ===
+    JSON.stringify({ name: 'set-password', body: { employee_id: 'e-hina', password: 'a-long-enough-one' } }),
+  JSON.stringify(captured.functions))
+check('…then closes and says to send it another way',
+  (await waitFor(() => !dialog())) && text().includes('Password set. Send it to them through a different channel'))
 
 reset()
 signInAs(PEOPLE.companyAdmin)

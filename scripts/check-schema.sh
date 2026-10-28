@@ -36,11 +36,12 @@ psql -d postgres <<'SQL'
 create role anon;
 create role authenticated;
 create role supabase_auth_admin;
+create role service_role;
 SQL
 
 stubs=$(cat <<'SQL'
 create schema auth;
-create table auth.users (id uuid primary key);
+create table auth.users (id uuid primary key, email text, email_confirmed_at timestamptz);
 create function auth.uid() returns uuid language sql stable as $$ select null::uuid $$;
 create function auth.jwt() returns jsonb language sql stable as $$ select '{}'::jsonb $$;
 create schema storage;

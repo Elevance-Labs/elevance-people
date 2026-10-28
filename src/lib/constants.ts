@@ -6,6 +6,7 @@ import type {
   EmployeeStatus,
   EmploymentType,
   EquipmentStatus,
+  LoginMethod,
   JobOpeningStatus,
   LeaveStatus,
   OffboardingReason,
@@ -28,6 +29,11 @@ export const APP_ROLE_LABELS: Record<AppRole, string> = {
   hr_admin: 'HR Admin',
   finance_admin: 'Finance Admin',
   company_admin: 'Company Admin',
+}
+
+export const LOGIN_METHOD_LABELS: Record<LoginMethod, string> = {
+  google: `Google (@${COMPANY_DOMAIN})`,
+  password: 'Email and password',
 }
 
 export const BUSINESS_FUNCTION_LABELS: Record<BusinessFunction, string> = {

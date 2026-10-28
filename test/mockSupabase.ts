@@ -87,6 +87,7 @@ function employee(
     employment_type: 'full_time',
     status,
     app_role,
+    login_method: 'google',
     created_at: '2024-01-15T09:00:00Z',
     updated_at: '2024-01-15T09:00:00Z',
   }
@@ -795,6 +796,7 @@ export const captured = {
   removals: [] as { bucket: string; paths: string[] }[],
   signedUrls: [] as { bucket: string; path: string; expiresIn: number }[],
   auth: [] as { call: string; options?: unknown }[],
+  functions: [] as { name: string; body: unknown }[],
   // Every database or storage call, in order — for asserting sequence.
   calls: [] as string[],
 }
@@ -827,6 +829,8 @@ export const authState = {
   session: null as Session,
   // What `bind_employee` hands back: the employee row, or null to refuse.
   bound: null as Employee | null,
+  // The page was opened from a password reset link: PASSWORD_RECOVERY follows the initial session.
+  recovery: false,
 }
 const listeners = new Set<Listener>()
 
@@ -888,6 +892,7 @@ export function reset() {
   failures.clear()
   authState.session = null
   authState.bound = null
+  authState.recovery = false
   listeners.clear()
 }
 reset()
@@ -1558,15 +1563,48 @@ export const supabase = {
       },
     }),
   },
+  // Edge Functions. `failNext('functions.<name>', …)` fails one the way
+  // supabase-js does: a generic error whose context is the function's reply.
+  functions: {
+    async invoke(name: string, options?: { body?: unknown }) {
+      captured.calls.push(`functions.${name}`)
+      captured.functions.push({ name, body: options?.body })
+      const error = takeFailure(`functions.${name}`)
+      if (!error) return { data: { ok: true }, error: null }
+      const context = new Response(JSON.stringify({ error: error.message }), { status: 400 })
+      return { data: null, error: Object.assign(new Error('Edge Function returned a non-2xx status code'), { context }) }
+    },
+  },
   auth: {
     onAuthStateChange(listener: Listener) {
       listeners.add(listener)
-      setTimeout(() => listener('INITIAL_SESSION', authState.session), 0)
+      setTimeout(() => {
+        listener('INITIAL_SESSION', authState.session)
+        if (authState.recovery) listener('PASSWORD_RECOVERY', authState.session)
+      }, 0)
       return { data: { subscription: { unsubscribe: () => listeners.delete(listener) } } }
     },
     async signInWithOAuth(options: unknown) {
       captured.auth.push({ call: 'signInWithOAuth', options })
       return { data: {}, error: null }
+    },
+    // Signs in whoever `authState.bound` is; `failNext('auth.signInWithPassword')` refuses.
+    async signInWithPassword(options: unknown) {
+      captured.auth.push({ call: 'signInWithPassword', options })
+      const error = takeFailure('auth.signInWithPassword')
+      if (error) return { data: { session: null }, error }
+      authState.session = { user: { id: `auth-${authState.bound?.id ?? 'stranger'}` } }
+      for (const l of listeners) l('SIGNED_IN', authState.session)
+      return { data: { session: authState.session }, error: null }
+    },
+    async resetPasswordForEmail(email: string, options: unknown) {
+      captured.auth.push({ call: 'resetPasswordForEmail', options: { email, ...(options as object) } })
+      return { data: {}, error: takeFailure('auth.resetPasswordForEmail') }
+    },
+    async updateUser(attributes: unknown) {
+      captured.auth.push({ call: 'updateUser', options: attributes })
+      const error = takeFailure('auth.updateUser')
+      return { data: { user: error ? null : authState.session?.user }, error }
     },
     async signOut() {
       captured.auth.push({ call: 'signOut' })

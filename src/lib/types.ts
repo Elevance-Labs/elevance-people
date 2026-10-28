@@ -1,5 +1,7 @@
 export type AppRole = 'company_admin' | 'hr_admin' | 'finance_admin' | 'member'
 export type EmploymentType = 'full_time' | 'part_time' | 'freelance' | 'contract'
+// Google (company domain) or, for someone without a company account, email and password.
+export type LoginMethod = 'google' | 'password'
 export type EmployeeStatus =
   | 'joining'
   | 'probation'
@@ -29,6 +31,7 @@ export interface Employee {
   employment_type: EmploymentType
   status: EmployeeStatus
   app_role: AppRole
+  login_method: LoginMethod
   created_at: string
   updated_at: string
 }

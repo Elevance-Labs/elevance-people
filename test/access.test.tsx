@@ -1,7 +1,7 @@
 // Sign-in and who reaches what: the AuthProvider's binding step, and the
 // route and nav gating in App/Layout for each role. The database enforces the
 // same rules with RLS; this proves the app does not offer what it would refuse.
-import { setupDom, reporter, text, button, click, navLabels, waitFor } from './setup'
+import { setupDom, reporter, text, button, click, type, field, dialog, navLabels, waitFor } from './setup'
 setupDom()
 
 const { mountApp, location } = await import('./app')
@@ -60,6 +60,73 @@ window.history.replaceState(null, '', '/?error_description=Signups+not+allowed')
 await mountApp('/')
 check('an error Supabase put in the URL is shown on the login page', text().includes('Signups not allowed'))
 window.history.replaceState(null, '', '/')
+
+// ---------------- a password login ----------------
+// Someone without a company Google account: an outside address, email and password.
+const OUTSIDER = { ...FINANCE, company_email: 'hina@gmail.com', login_method: 'password' as const }
+const authCall = (call: string) => captured.auth.filter((a) => a.call === call).at(-1)?.options as
+  Record<string, unknown> | undefined
+
+reset()
+await mountApp('/')
+check('the password form is folded away behind a link', !field('Password') && !!button('Sign in with email and password'))
+await click(button('Sign in with email and password'))
+await type('Email', ' Hina@Gmail.com ')
+await type('Password', 'not-it')
+failNext('auth.signInWithPassword', { message: 'Invalid login credentials' })
+await click(button('Sign in'))
+check('a password sign-in sends the email trimmed and lower-cased, and the password as typed',
+  authCall('signInWithPassword')?.email === 'hina@gmail.com' && authCall('signInWithPassword')?.password === 'not-it',
+  JSON.stringify(authCall('signInWithPassword')))
+check('a wrong password is shown, still signed out',
+  text().includes('Invalid login credentials') && authState.session === null, text().slice(0, 300))
+
+authState.bound = OUTSIDER
+await type('Password', 'right-one')
+await click(button('Sign in'))
+check('signed in by password, the session is still bound like any other',
+  captured.rpcs.some((r) => r.name === 'bind_employee') && (await waitFor(() => location.pathname === '/dashboard')),
+  location.pathname)
+check('…and the app shows them with their role', text().includes('Hina Raza') && text().includes('Finance Admin'))
+
+await click(button('Account menu'))
+await click([...document.querySelectorAll('[role="menuitem"]')].find((m) => m.textContent?.includes('Change password')))
+check('a password login can change their password', dialog()?.textContent?.includes('Change password'))
+await type('New password', 'longer-secret')
+await type('Confirm new password', 'longer-secreT')
+await click(button('Save', dialog()!))
+check('…the two must match', dialog()?.textContent?.includes('The passwords do not match.') && !authCall('updateUser'))
+await type('Confirm new password', 'longer-secret')
+await click(button('Save', dialog()!))
+check('…and the new one is sent', authCall('updateUser')?.password === 'longer-secret', JSON.stringify(authCall('updateUser')))
+check('…then the dialog closes', await waitFor(() => !dialog()))
+
+reset()
+signInAs(PEOPLE.member)
+await mountApp('/')
+await click(button('Account menu'))
+check('a Google login has no password to change',
+  ![...document.querySelectorAll('[role="menuitem"]')].some((m) => m.textContent?.includes('Change password')))
+
+reset()
+await mountApp('/')
+await click(button('Sign in with email and password'))
+await click(button('Forgot password?'))
+check('a reset needs the email first', text().includes('Enter your email first.') && !authCall('resetPasswordForEmail'))
+await type('Email', 'Hina@gmail.com')
+await click(button('Forgot password?'))
+check('a reset link is asked for that address, back to this page',
+  authCall('resetPasswordForEmail')?.email === 'hina@gmail.com' &&
+  authCall('resetPasswordForEmail')?.redirectTo === window.location.origin + window.location.pathname,
+  JSON.stringify(authCall('resetPasswordForEmail')))
+check('…without saying whether the address has a login', text().includes('If that address has a password login'))
+
+reset()
+signInAs(OUTSIDER)
+authState.recovery = true
+await mountApp('/')
+check('opened from a reset link, they are asked for a new password straight away',
+  dialog()?.textContent?.includes('Set a new password'), text().slice(0, 200))
 
 // ---------------- member ----------------
 // Sara interviews for Frontend Engineer in the fixtures; take her off that
