@@ -386,7 +386,7 @@ export interface SalaryRevision {
 // A row of the my_salaries RPC: the caller's own approved salaries.
 export type MySalary = Pick<SalaryRevision, 'id' | 'effective_from' | 'basic_salary' | 'contractual_amount' | 'approved_at'>
 
-export type PayrollStatus = 'draft' | 'review' | 'approved' | 'processed'
+export type PayrollStatus = 'draft' | 'review' | 'approved' | 'processed' | 'disbursed'
 
 // One month's payroll. Created by payroll_create; status changes only through
 // payroll_move. Never deleted.
@@ -398,14 +398,16 @@ export interface Payroll {
   status: PayrollStatus
   created_by: string | null
   created_at: string
-  // The last move to review, approved and processed; back to draft clears
-  // the first two.
+  // The last move to review, approved, processed and disbursed; back to
+  // draft clears the first two.
   submitted_by: string | null
   submitted_at: string | null
   approved_by: string | null
   approved_at: string | null
   processed_by: string | null
   processed_at: string | null
+  disbursed_by: string | null
+  disbursed_at: string | null
   updated_at: string
 }
 
@@ -445,13 +447,13 @@ export interface PayrollItem {
   updated_at: string
 }
 
-// A row of the my_payslips RPC: the caller's own line on a processed
+// A row of the my_payslips RPC: the caller's own line on a disbursed
 // payroll, without the remarks.
 export type Payslip = Omit<
   PayrollItem,
   'id' | 'employee_id' | 'hr_remarks' | 'finance_remarks' | 'created_at' | 'updated_at'
 > &
-  Pick<Payroll, 'year' | 'month' | 'processed_at'>
+  Pick<Payroll, 'year' | 'month' | 'disbursed_at'>
 
 // Configuration → Vendors.
 export interface Vendor {

@@ -78,7 +78,13 @@ const MOVES: Record<PayrollStatus, { label: string; message: (period: string) =>
   },
   processed: {
     label: 'Mark processed',
-    message: (p) => `The ${p} payroll will be marked processed. This is final: it can’t be changed or reopened.`,
+    message: (p) =>
+      `The ${p} payroll will be marked processed. Its lines can’t be changed or reopened after this; finance marks it disbursed once salaries are paid.`,
+  },
+  disbursed: {
+    label: 'Mark disbursed',
+    message: (p) =>
+      `The ${p} payroll will be marked disbursed, and everyone on it gets their payslip. This is final: it can’t be undone.`,
   },
 }
 
@@ -86,7 +92,8 @@ const MOVES: Record<PayrollStatus, { label: string; message: (period: string) =>
 // person. While it's a draft, HR edits basic salary, contractual amount,
 // absent days and HR remarks, finance the rest, and anyone here adds or
 // removes people. Then it goes to review, a company admin approves it (or
-// sends it back to draft), and finance marks it processed. Every rule is
+// sends it back to draft), finance marks it processed and, once salaries are
+// paid, disbursed, which gives employees their payslips. Every rule is
 // enforced by the database; this page only offers what it would allow.
 export default function PayrollDetail() {
   const { id = '' } = useParams()
@@ -224,12 +231,13 @@ export default function PayrollDetail() {
   const period = periodLabel(payroll)
   const draft = payroll.status === 'draft'
   // Draft → review by anyone here; approving and reopening by a company
-  // admin; processing by finance.
+  // admin; processing and disbursing by finance.
   const moves: PayrollStatus[] = {
     draft: ['review'] as PayrollStatus[],
     review: isCompanyAdmin ? ['draft', 'approved'] : [],
     approved: [...(isCompanyAdmin ? ['draft'] : []), ...(isFinance ? ['processed'] : [])],
-    processed: [],
+    processed: isFinance ? ['disbursed'] : [],
+    disbursed: [],
   }[payroll.status] as PayrollStatus[]
   const onPayroll = new Set(items.map((i) => i.employee_id))
   const candidates = people
@@ -280,7 +288,7 @@ export default function PayrollDetail() {
             <Chip
               label={PAYROLL_STATUS_LABELS[payroll.status]}
               color={PAYROLL_STATUS_COLORS[payroll.status]}
-              variant={payroll.status === 'processed' ? 'filled' : 'outlined'}
+              variant={payroll.status === 'disbursed' ? 'filled' : 'outlined'}
             />
             {moves.map((to) => (
               <Button
@@ -312,12 +320,21 @@ export default function PayrollDetail() {
       {payroll.status === 'approved' && (
         <Alert severity="info" sx={{ mb: 2 }}>
           Approved by {nameOf(payroll.approved_by)} on {formatDayTime(payroll.approved_at ?? '')}.{' '}
-          {isFinance ? 'Mark it processed once salaries are paid.' : 'Finance marks it processed once salaries are paid.'}
+          {isFinance ? 'Mark it processed once salaries are sent for payment.' : 'Finance marks it processed once salaries are sent for payment.'}
         </Alert>
       )}
       {payroll.status === 'processed' && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Processed by {nameOf(payroll.processed_by)} on {formatDayTime(payroll.processed_at ?? '')}.{' '}
+          {isFinance
+            ? 'Mark it disbursed once salaries are paid; employees then get their payslips.'
+            : 'Finance marks it disbursed once salaries are paid; employees then get their payslips.'}
+        </Alert>
+      )}
+      {payroll.status === 'disbursed' && (
         <Alert severity="success" sx={{ mb: 2 }}>
-          Processed by {nameOf(payroll.processed_by)} on {formatDayTime(payroll.processed_at ?? '')}.
+          Processed by {nameOf(payroll.processed_by)} on {formatDayTime(payroll.processed_at ?? '')}. Disbursed by{' '}
+          {nameOf(payroll.disbursed_by)} on {formatDayTime(payroll.disbursed_at ?? '')}; payslips are out.
         </Alert>
       )}
 

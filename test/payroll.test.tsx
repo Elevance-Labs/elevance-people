@@ -38,11 +38,11 @@ await mountApp('/finance/payroll')
 const listRows = () => [...document.querySelectorAll('tbody tr')].map((r) => r.textContent ?? '')
 check('payrolls are listed newest first, with status, head count and net payable',
   listRows()[0].includes('May 2026') && listRows()[0].includes('Draft') && listRows()[0].includes('3') &&
-    listRows()[0].includes('586,500') && listRows()[1].includes('April 2026') && listRows()[1].includes('Processed'),
+    listRows()[0].includes('586,500') && listRows()[1].includes('April 2026') && listRows()[1].includes('Disbursed'),
   listRows().join(' | '))
 check('a new payroll can’t be started while one is open, and the page says why',
   button('New payroll')?.hasAttribute('disabled') &&
-    text().includes('The May 2026 payroll is a draft. It must be processed before another is started.'))
+    text().includes('The May 2026 payroll is a draft. It must be disbursed before another is started.'))
 await click(row('May 2026'))
 check('a row opens the payroll', location.pathname === '/finance/payroll/pr-may', location.pathname)
 
@@ -51,7 +51,12 @@ reset()
 Object.assign(table('payrolls').find((p) => p.id === 'pr-may')!, { status: 'processed' })
 signInAs(PEOPLE.hr)
 await mountApp('/finance/payroll')
-check('with every payroll processed, a new one can be started', button('New payroll')?.hasAttribute('disabled') === false)
+check('a processed payroll is still open until it’s disbursed',
+  button('New payroll')?.hasAttribute('disabled') &&
+    text().includes('The May 2026 payroll is processed. It must be disbursed before another is started.'))
+Object.assign(table('payrolls').find((p) => p.id === 'pr-may')!, { status: 'disbursed' })
+await mountApp('/finance/payroll')
+check('with every payroll disbursed, a new one can be started', button('New payroll')?.hasAttribute('disabled') === false)
 await click(button('New payroll'))
 check('…for the month after the latest, by default',
   combo('Month')?.textContent === 'June' && combo('Year')?.textContent === '2026',
@@ -246,15 +251,36 @@ await mountApp('/finance/payroll/pr-may')
 check('finance can mark it processed, but not reopen it', !!button('Mark processed') && !button('Back to draft'))
 failNext('rpc.payroll_move', { code: '42501', message: 'Only finance can mark a payroll processed.' })
 await click(button('Mark processed'))
-check('processing asks first, and says it’s final', d().textContent?.includes('This is final'))
+check('processing asks first, and says the lines are then fixed', d().textContent?.includes('can’t be changed or reopened'))
 await click(button('Mark processed', d()))
 check('a refusal is shown', await waitFor(() => text().includes('Only finance can mark a payroll processed.')))
 await click(button('Mark processed'))
 await click(button('Mark processed', d()))
 check('processing goes through payroll_move',
   rpcArgs('payroll_move').at(-1) === JSON.stringify({ p_payroll_id: 'pr-may', p_status: 'processed' }))
-check('…then it’s final', await waitFor(() => text().includes('Processed by Hina Raza')) &&
-  !button('Back to draft') && !button('Mark processed') && !button('Edit Sara Iqbal') && !button('Add employee'))
+check('…then its lines are fixed, and finance can mark it disbursed',
+  await waitFor(() => text().includes('Processed by Hina Raza')) && !button('Back to draft') &&
+    !button('Mark processed') && !button('Edit Sara Iqbal') && !button('Add employee') && !!button('Mark disbursed'))
+
+signInAs(PEOPLE.hr)
+await mountApp('/finance/payroll/pr-may')
+check('HR can’t disburse a processed payroll', text().includes('Processed by Hina Raza') && !button('Mark disbursed'))
+
+signInAs(FINANCE)
+await mountApp('/finance/payroll/pr-may')
+failNext('rpc.payroll_move', { code: '42501', message: 'Only finance can mark a payroll disbursed.' })
+await click(button('Mark disbursed'))
+check('disbursing asks first, says payslips go out, and that it’s final',
+  d().textContent?.includes('gets their payslip') && d().textContent?.includes('This is final'))
+await click(button('Mark disbursed', d()))
+check('a refusal to disburse is shown', await waitFor(() => text().includes('Only finance can mark a payroll disbursed.')))
+await click(button('Mark disbursed'))
+await click(button('Mark disbursed', d()))
+check('disbursing goes through payroll_move',
+  rpcArgs('payroll_move').at(-1) === JSON.stringify({ p_payroll_id: 'pr-may', p_status: 'disbursed' }))
+check('…then it’s final', await waitFor(() => text().includes('Disbursed by Hina Raza')) &&
+  !button('Back to draft') && !button('Mark processed') && !button('Mark disbursed') && !button('Edit Sara Iqbal') &&
+  !button('Add employee'))
 check('no payroll or line is ever written directly',
   !captured.updates.some((u) => u.table === 'payrolls') && !captured.inserts.some((i) => i.table === 'payrolls') &&
     !captured.deletes.some((x) => x.table === 'payrolls'))
@@ -264,7 +290,7 @@ reset()
 signInAs(PEOPLE.member)
 await mountApp('/profile?tab=payslips')
 const slipRows = () => [...document.querySelectorAll('tbody tr')].map((r) => r.textContent ?? '')
-check('an employee’s processed payslips are listed by month, year and net amount',
+check('an employee’s disbursed payslips are listed by month, year and net amount',
   await waitFor(() => slipRows().length === 1) && slipRows()[0].includes('April') && slipRows()[0].includes('2026') &&
     slipRows()[0].includes('113,000'), slipRows().join(' | '))
 check('…read only through my_payslips, never the payroll tables',
@@ -278,6 +304,7 @@ check('a payslip opens to its breakdown',
     'Absent deduction (0.5 day)-2,000', 'Gross salary117,000', 'Tax4,000', 'Total deductions4,000',
     'Net payable salaryPKR 113,000'].every((t) => slip().includes(t)), slip())
 check('…without the internal remarks', !slip().includes('Internal'))
+check('…and says when it was disbursed', slip().includes('· Disbursed '), slip())
 
 await click(button('Download PDF', d()))
 const pdf = await blobs.at(-1)!.text()
@@ -285,7 +312,7 @@ check('…and downloads as a PDF named for the month',
   downloads.at(-1) === 'payslip-2026-04.pdf' && pdf.startsWith('%PDF'), downloads.at(-1))
 check('…with the person, their designation, the figures and net pay in it',
   ['(Sara Iqbal)', '(#0003)', '(Software Engineer)', '(Engineering)', '(April 2026)', '(Arrears)', '(6,000)',
-    '(Gross salary)', '(117,000)', '(PKR 113,000)'].every((t) => pdf.includes(t)),
+    '(Gross salary)', '(117,000)', '(PKR 113,000)', '(DISBURSED ON)'].every((t) => pdf.includes(t)),
   pdf.match(/\((?:[^()\\]|\\.)*\) Tj/g)?.slice(0, 40).join(' '))
 await click(button('Close', d()))
 await waitFor(() => !dialog())
@@ -298,7 +325,14 @@ check('a payslip downloads from its row too', await waitFor(() => downloads.leng
 reset()
 signInAs(PEOPLE.hr)
 await mountApp('/profile?tab=payslips')
-check('someone with no processed payslip is told so', await waitFor(() => text().includes('No payslips yet.')))
+check('someone with no disbursed payslip is told so', await waitFor(() => text().includes('No payslips yet.')))
+
+reset()
+Object.assign(table('payrolls').find((p) => p.id === 'pr-apr')!, { status: 'processed' })
+signInAs(PEOPLE.member)
+await mountApp('/profile?tab=payslips')
+check('a payroll that’s processed but not yet disbursed gives no payslip',
+  await waitFor(() => text().includes('No payslips yet.')) && !slipRows().some((r) => r.includes('April')))
 
 reset()
 signInAs(PEOPLE.member)

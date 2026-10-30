@@ -34,7 +34,7 @@ create type public.application_stage as enum (
 create type public.onboarding_status as enum ('in_progress', 'completed', 'cancelled');
 create type public.offboarding_status as enum ('in_progress', 'completed', 'cancelled');
 create type public.offboarding_reason as enum ('resigned', 'terminated', 'contract_ended', 'other');
-create type public.payroll_status as enum ('draft', 'review', 'approved', 'processed');
+create type public.payroll_status as enum ('draft', 'review', 'approved', 'processed', 'disbursed');
 create type public.salary_revision_status as enum ('draft', 'review', 'approved');
 create type public.equipment_status as enum ('requested', 'active', 'faulty', 'retired', 'sold');
 create type public.review_status as enum ('draft', 'submitted');
@@ -579,8 +579,9 @@ create index offboarding_tasks_offboarding_idx
 
 -- ---------------------------------------------------------------------------
 -- Payroll: one per month, with a line per employee. HR, finance and company
--- admins work on it. It moves draft → review → approved → processed through
--- payroll_move, is never deleted, and its lines change only while a draft.
+-- admins work on it. It moves draft → review → approved → processed →
+-- disbursed through payroll_move, is never deleted, and its lines change only
+-- while a draft. Employees see their payslips once it's disbursed.
 -- ---------------------------------------------------------------------------
 
 -- Written only by payroll_create and payroll_move.
@@ -591,8 +592,9 @@ create table public.payrolls (
   status       public.payroll_status not null default 'draft',
   created_by   uuid references public.employees (id) on delete set null,
   created_at   timestamptz not null default now(),
-  -- The last move to review, approved and processed. Going back to draft
-  -- clears the review and approval.
+  -- The last move to review, approved, processed and disbursed. Going back
+  -- to draft clears the review and approval. Disbursed was added later, so
+  -- its columns come last.
   submitted_by uuid references public.employees (id) on delete set null,
   submitted_at timestamptz,
   approved_by  uuid references public.employees (id) on delete set null,
@@ -600,10 +602,12 @@ create table public.payrolls (
   processed_by uuid references public.employees (id) on delete set null,
   processed_at timestamptz,
   updated_at   timestamptz not null default now(),
+  disbursed_by uuid references public.employees (id) on delete set null,
+  disbursed_at timestamptz,
   constraint payrolls_period_key unique (year, month)
 );
--- At most one payroll not yet processed.
-create unique index payrolls_one_open on public.payrolls ((true)) where status <> 'processed';
+-- At most one payroll not yet disbursed.
+create unique index payrolls_one_open on public.payrolls ((true)) where status <> 'disbursed';
 
 -- Money is in PKR. Column order matches the migrated database (arrears was
 -- added later, and gross and net re-added after it).
@@ -2335,11 +2339,11 @@ begin
     raise exception 'There is already a payroll for %.', to_char(make_date(p_year, p_month, 1), 'FMMonth YYYY')
       using errcode = '23505';
   end if;
-  select * into v_open from public.payrolls where status <> 'processed';
+  select * into v_open from public.payrolls where status <> 'disbursed';
   if found then
-    raise exception 'The % payroll is still %. It must be processed before another is started.',
+    raise exception 'The % payroll is still %. It must be disbursed before another is started.',
       to_char(make_date(v_open.year, v_open.month, 1), 'FMMonth YYYY'),
-      case v_open.status when 'draft' then 'a draft' when 'review' then 'in review' else 'approved' end;
+      case v_open.status when 'draft' then 'a draft' when 'review' then 'in review' else v_open.status::text end;
   end if;
 
   insert into public.payrolls (year, month, created_by)
@@ -2386,6 +2390,12 @@ begin
       raise exception 'Only finance can mark a payroll processed.' using errcode = '42501';
     end if;
     update public.payrolls set status = 'processed', processed_by = v_me, processed_at = now()
+     where id = p_payroll_id;
+  elsif v_payroll.status = 'processed' and p_status = 'disbursed' then
+    if not public.is_finance() then
+      raise exception 'Only finance can mark a payroll disbursed.' using errcode = '42501';
+    end if;
+    update public.payrolls set status = 'disbursed', disbursed_by = v_me, disbursed_at = now()
      where id = p_payroll_id;
   else
     raise exception 'A payroll can''t move from % to %.', v_payroll.status, p_status;
@@ -2481,26 +2491,26 @@ language sql stable security definer set search_path = '' as $$
 $$;
 
 -- ---------------------------------------------------------------------------
--- Payslips: an employee's own lines once a payroll is processed. The payroll
+-- Payslips: an employee's own lines once a payroll is disbursed. The payroll
 -- tables stay HR and finance only.
 -- ---------------------------------------------------------------------------
 
--- The caller's own lines on processed payrolls, newest first. No remarks.
+-- The caller's own lines on disbursed payrolls, newest first. No remarks.
 create function public.my_payslips()
-returns table (payroll_id uuid, year integer, month integer, processed_at timestamptz,
+returns table (payroll_id uuid, year integer, month integer, disbursed_at timestamptz,
                employee_number integer, full_name text, basic_salary numeric,
                contractual_amount numeric, bonus_type text, bonus_value numeric, bonus numeric,
                absent_days numeric, absent_deduction numeric, allowance numeric, arrears numeric,
                gross_salary numeric, advance_salary numeric, loan_deduction numeric,
                tax_amount numeric, net_salary numeric)
 language sql stable security definer set search_path = '' as $$
-  select p.id, p.year, p.month, p.processed_at, i.employee_number, i.full_name, i.basic_salary,
+  select p.id, p.year, p.month, p.disbursed_at, i.employee_number, i.full_name, i.basic_salary,
          i.contractual_amount, i.bonus_type, i.bonus_value, i.bonus, i.absent_days,
          i.absent_deduction, i.allowance, i.arrears, i.gross_salary, i.advance_salary,
          i.loan_deduction, i.tax_amount, i.net_salary
     from public.payroll_items i
     join public.payrolls p on p.id = i.payroll_id
-   where p.status = 'processed' and i.employee_id = public.current_employee_id()
+   where p.status = 'disbursed' and i.employee_id = public.current_employee_id()
    order by p.year desc, p.month desc;
 $$;
 

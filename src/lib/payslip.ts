@@ -42,7 +42,7 @@ export async function payslipPdf(slip: Payslip, person: PayslipPerson): Promise<
     ['Designation', person.designation ?? '-'],
     ['Department', person.department ?? '-'],
     ['Pay period', period],
-    ['Processed on', slip.processed_at ? formatDay(slip.processed_at) : '-'],
+    ['Disbursed on', slip.disbursed_at ? formatDay(slip.disbursed_at) : '-'],
   ]
   y += 9
   details.forEach(([label, value], i) => {

@@ -346,15 +346,16 @@ function payroll(id: string, year: number, month: number, status: string, extra:
   return {
     id, year, month, status, created_by: 'e-bilal', created_at: '2026-05-25T09:00:00Z', submitted_by: null,
     submitted_at: null, approved_by: null, approved_at: null, processed_by: null, processed_at: null,
-    updated_at: '2026-05-25T09:00:00Z', ...extra,
+    disbursed_by: null, disbursed_at: null, updated_at: '2026-05-25T09:00:00Z', ...extra,
   }
 }
 
-// April was processed; May is the open draft.
+// April was disbursed; May is the open draft.
 const PAYROLLS: Row[] = [
-  payroll('pr-apr', 2026, 4, 'processed', {
+  payroll('pr-apr', 2026, 4, 'disbursed', {
     created_at: '2026-04-25T09:00:00Z', submitted_by: 'e-bilal', submitted_at: '2026-04-26T09:00:00Z',
     approved_by: 'e-amna', approved_at: '2026-04-27T09:00:00Z', processed_by: 'e-amna', processed_at: '2026-04-30T09:00:00Z',
+    disbursed_by: 'e-amna', disbursed_at: '2026-05-01T09:00:00Z',
   }),
   payroll('pr-may', 2026, 5, 'draft'),
 ]
@@ -1266,14 +1267,14 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     return id
   },
 
-  // The caller's lines on processed payrolls, newest first, without remarks.
+  // The caller's lines on disbursed payrolls, newest first, without remarks.
   my_payslips: () =>
     rowsIn('payroll_items')
-      .filter((i) => i.employee_id === authState.bound?.id && find('payrolls', i.payroll_id)?.status === 'processed')
+      .filter((i) => i.employee_id === authState.bound?.id && find('payrolls', i.payroll_id)?.status === 'disbursed')
       .map((i) => {
         const p = find('payrolls', i.payroll_id)!
         const { id: _id, employee_id: _e, hr_remarks: _h, finance_remarks: _f, created_at: _c, updated_at: _u, ...line } = i
-        return { ...line, ...payrollFigures(i), year: p.year, month: p.month, processed_at: p.processed_at }
+        return { ...line, ...payrollFigures(i), year: p.year, month: p.month, disbursed_at: p.disbursed_at }
       })
       .sort((a, b) => Number(b.year) * 12 + Number(b.month) - (Number(a.year) * 12 + Number(a.month))),
 
@@ -1286,6 +1287,7 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     if (status === 'review') Object.assign(p, { status, submitted_by: me, submitted_at: now })
     if (status === 'approved') Object.assign(p, { status, approved_by: me, approved_at: now })
     if (status === 'processed') Object.assign(p, { status, processed_by: me, processed_at: now })
+    if (status === 'disbursed') Object.assign(p, { status, disbursed_by: me, disbursed_at: now })
     if (status === 'draft')
       Object.assign(p, { status, submitted_by: null, submitted_at: null, approved_by: null, approved_at: null })
     return null

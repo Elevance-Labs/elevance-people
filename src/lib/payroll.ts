@@ -178,7 +178,7 @@ export const payslipFileName = (p: Pick<Payroll, 'year' | 'month'>) =>
 export function payrollError(error: { code?: string; message: string }) {
   if (error.message.includes('payroll_items_employee_key')) return 'This person is already on the payroll.'
   if (error.message.includes('payrolls_one_open'))
-    return 'Another payroll is still open. It must be processed before another is started.'
+    return 'Another payroll is still open. It must be disbursed before another is started.'
   if (error.message.includes('payroll_items_absent_days_check'))
     return 'Absent days must be between 0 and 31, in steps of half a day.'
   if (error.message.includes('remarks_check')) return 'Remarks can be up to 1,000 characters.'

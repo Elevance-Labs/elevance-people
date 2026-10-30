@@ -160,13 +160,15 @@ export const PAYROLL_STATUS_LABELS: Record<PayrollStatus, string> = {
   review: 'In review',
   approved: 'Approved',
   processed: 'Processed',
+  disbursed: 'Disbursed',
 }
 
 export const PAYROLL_STATUS_COLORS: Record<PayrollStatus, ChipProps['color']> = {
   draft: 'default',
   review: 'warning',
   approved: 'info',
-  processed: 'success',
+  processed: 'primary',
+  disbursed: 'success',
 }
 
 export const EQUIPMENT_STATUS_LABELS: Record<EquipmentStatus, string> = {

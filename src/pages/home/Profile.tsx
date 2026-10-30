@@ -30,7 +30,7 @@ import Payslips from "./Payslips";
 import Salary from "./Salary";
 
 // Everyone's own record, read-only: changes go through HR. Members read their
-// own row by RLS, their equipment through my_equipment and their processed
+// own row by RLS, their equipment through my_equipment and their disbursed
 // payroll lines through my_payslips and their approved salaries through
 // my_salaries.
 // The tab lives in the URL (?tab=salary) so it can be linked to.

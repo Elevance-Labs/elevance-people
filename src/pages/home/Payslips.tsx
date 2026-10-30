@@ -62,7 +62,7 @@ function Lines({ title, lines, total }: { title: string; lines: PayslipLine[]; t
   )
 }
 
-// Profile → Payslips: the signed-in person's own line of every processed
+// Profile → Payslips: the signed-in person's own line of every disbursed
 // payroll (my_payslips; the payroll tables themselves are HR and finance
 // only). A row opens the breakdown; either downloads the PDF.
 export default function Payslips({ person }: { person: PayslipPerson }) {
@@ -145,7 +145,7 @@ export default function Payslips({ person }: { person: PayslipPerson }) {
               {!slips.length && (
                 <TableRow>
                   <TableCell colSpan={4} sx={{ py: 8, textAlign: 'center', color: 'text.secondary' }}>
-                    No payslips yet. Each month’s shows here once its payroll is processed.
+                    No payslips yet. Each month’s shows here once its payroll is disbursed.
                   </TableCell>
                 </TableRow>
               )}
@@ -160,7 +160,7 @@ export default function Payslips({ person }: { person: PayslipPerson }) {
           <DialogContent>
             <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
               {open.full_name} · {formatEmployeeNumber(open.employee_number)}
-              {open.processed_at && ` · Processed ${formatDay(open.processed_at)}`}
+              {open.disbursed_at && ` · Disbursed ${formatDay(open.disbursed_at)}`}
             </Typography>
             <Lines title="Earnings" lines={breakdown.earnings} total={['Gross salary', breakdown.gross]} />
             <Lines

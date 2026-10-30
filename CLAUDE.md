@@ -139,7 +139,7 @@ behaviour).
   per function); tab in `?tab=`. `/resources/guides/:slug` — one guide's doc
   in an iframe; back to Resources if RLS hides it or it has no link.
 - `/handbook` — everyone: the Google Doc handbook in an iframe (its `/preview`
-  URL, from `constants.ts`). `/profile` — everyone: own record, read-only (RLS: a member reads only their own row); tabs *Profile*, *Equipment* (own equipment via `my_equipment`: name, identifier, date), *Salary* (own approved salaries via `my_salaries`: current, then history), *Payslips* (own processed payroll lines via `my_payslips`; breakdown dialog and PDF), tab kept in `?tab=`.
+  URL, from `constants.ts`). `/profile` — everyone: own record, read-only (RLS: a member reads only their own row); tabs *Profile*, *Equipment* (own equipment via `my_equipment`: name, identifier, date), *Salary* (own approved salaries via `my_salaries`: current, then history), *Payslips* (own disbursed payroll lines via `my_payslips`; breakdown dialog and PDF), tab kept in `?tab=`.
 - `/employees` — HR list of employee records. HR only.
 - `/appraisals` — HR: salary revisions by status (`?status=`, drafts by
   default); write drafts, send for review; company admins approve / reject.
@@ -379,16 +379,17 @@ Full detail in `supabase/schema.sql`.
   HR and the manager, never the employee. No client writes. Cascades away
   with the employee.
 - `payrolls` — one per month and year, never deleted (no grant), at most one
-  not yet processed (partial unique index). Status `draft` → `review` →
-  `approved` → `processed` only via `payroll_move` (approve and back to
-  draft: company admin; processed: finance); `payroll_create` adds everyone
+  not yet disbursed (partial unique index). Status `draft` → `review` →
+  `approved` → `processed` → `disbursed` only via `payroll_move` (approve
+  and back to draft: company admin; processed and disbursed: finance);
+  `payroll_create` adds everyone
   who may log in. `payroll_items` — one line per person; name and number
   copied in, bonus / gross / net are generated columns, kept (employee id
   nulled) if the employee is deleted. `payroll_items_guard`: changes only
   while draft, HR's columns vs finance's, only login statuses added,
   basic and contractual from the salary in force that month (`salary_on`),
   else carried from the latest earlier payroll, as the allowance always is. Payroll roles
-  only (RLS). `my_payslips` — the caller's own lines on processed payrolls,
+  only (RLS). `my_payslips` — the caller's own lines on disbursed payrolls,
   without remarks; the only way an employee reads payroll data.
 - `salary_revisions` — appraisals: employee, starting month (first day),
   basic, contractual, note. `draft` → `review` → `approved`, or rejected
@@ -519,7 +520,8 @@ Full detail in `supabase/schema.sql`.
   the lines and review row are updated → `review_submit` → the employee reads
   it and `review_acknowledge`s. Nothing reopens a submitted review.
 - Payroll: `payroll_create` → lines edited / added / removed while draft
-  (`payroll_items_guard`) → `payroll_move` to review, approved, processed.
+  (`payroll_items_guard`) → `payroll_move` to review, approved, processed,
+  disbursed (only then do payslips show).
 - Equipment save: upload picked invoice / photo → insert or update the row
   (uploads removed if it fails) → remove the replaced files. Delete: row,
   then files. Holder names come from `employee_directory` (finance admins

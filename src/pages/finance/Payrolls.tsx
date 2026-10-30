@@ -32,11 +32,11 @@ import {
   type PayrollListRow,
 } from '../../lib/payroll'
 
-const OPEN_STATUS_TEXT = { draft: 'a draft', review: 'in review', approved: 'approved' }
+const OPEN_STATUS_TEXT = { draft: 'a draft', review: 'in review', approved: 'approved', processed: 'processed' }
 
 // Finance → Payroll (HR, finance admins, company admins): one payroll per
 // month, newest first. A new one starts with everyone who can be paid; only
-// one may be open (not yet processed) at a time. A row opens the payroll.
+// one may be open (not yet disbursed) at a time. A row opens the payroll.
 export default function Payrolls() {
   const navigate = useNavigate()
   const [rows, setRows] = useState<PayrollListRow[]>([])
@@ -58,7 +58,7 @@ export default function Payrolls() {
       })
   }, [])
 
-  const open = rows.find((r) => r.status !== 'processed')
+  const open = rows.find((r) => r.status !== 'disbursed')
 
   // Suggests the month after the latest payroll, or this month for the first.
   function startCreating() {
@@ -109,7 +109,7 @@ export default function Payrolls() {
       {open && (
         <Alert severity="info" sx={{ mb: 2 }}>
           The {periodLabel(open)} payroll is {OPEN_STATUS_TEXT[open.status as keyof typeof OPEN_STATUS_TEXT]}. It
-          must be processed before another is started.
+          must be disbursed before another is started.
         </Alert>
       )}
 
@@ -143,7 +143,7 @@ export default function Payrolls() {
                       label={PAYROLL_STATUS_LABELS[r.status]}
                       color={PAYROLL_STATUS_COLORS[r.status]}
                       size="small"
-                      variant={r.status === 'processed' ? 'filled' : 'outlined'}
+                      variant={r.status === 'disbursed' ? 'filled' : 'outlined'}
                     />
                   </TableCell>
                   <TableCell align="right">{r.items.length}</TableCell>
