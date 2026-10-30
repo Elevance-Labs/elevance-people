@@ -139,7 +139,7 @@ signInAs(PEOPLE.member)
 await mountApp('/')
 check('a member lands on the dashboard', location.pathname === '/dashboard', location.pathname)
 check('a member is offered the home pages, the org chart, performance and their own leaves',
-  navLabels().join() === 'Dashboard,Handbook,Resources,Profile,Org chart,Performance,My leaves', navLabels().join())
+  navLabels().join() === 'Dashboard,Handbook,Resources,Profile,My leaves,Org chart,Performance', navLabels().join())
 check('the header shows who is signed in and their role', text().includes('Sara Iqbal') && text().includes('Member'))
 
 for (const path of [
@@ -148,7 +148,7 @@ for (const path of [
   '/company/announcements', '/applications', '/hr/onboarding', '/hr/onboarding/ob-sara', '/hr/offboarding',
   '/configuration/onboarding', '/configuration/offboarding', '/hr/offboarding/off-sara', '/finance/payroll', '/finance/payroll/pr-may',
   '/operations/equipment', '/operations/equipment/new', '/operations/equipment/eq-laptop', '/configuration/vendors',
-  '/company/expectations', '/performance/people/e-amna',
+  '/company/expectations', '/performance/people/e-amna', '/finance/reimbursements', '/reimbursements',
 ]) {
   reset()
   offHiringTeam()
@@ -161,6 +161,7 @@ for (const path of [
   check(`…nor payroll for ${path}`, !captured.reads.some((r) => r.startsWith('payroll')), captured.reads.join())
   check(`…nor equipment or vendors for ${path}`,
     !captured.reads.some((r) => r.startsWith('equipment') || r === 'vendors'), captured.reads.join())
+  check(`…nor reimbursements for ${path}`, !captured.reads.includes('reimbursements'), captured.reads.join())
 }
 
 // ---------------- a member who manages someone ----------------
@@ -173,7 +174,7 @@ check('having a direct report is checked at sign-in',
   captured.reads.includes('org_chart_nodes'), captured.reads.join())
 check('a member with a direct report reaches leave requests', location.pathname === '/leaves/requests', location.pathname)
 check('…and is offered it and their reports\' offboarding, but not HR\'s leave set-up',
-  navLabels().join() === 'Dashboard,Handbook,Resources,Profile,Org chart,Performance,My leaves,Leave requests,Offboarding',
+  navLabels().join() === 'Dashboard,Handbook,Resources,Profile,My leaves,Org chart,Performance,Leave requests,Offboarding',
   navLabels().join())
 
 // ---------------- a member on a job's hiring team ----------------
@@ -184,7 +185,7 @@ check('being on a hiring team is asked of the database at sign-in',
   captured.rpcs.some((r) => r.name === 'on_hiring_team'))
 check('an interviewer reaches applications, and is offered it but not job openings',
   location.pathname === '/applications' &&
-    navLabels().join() === 'Dashboard,Handbook,Resources,Profile,Org chart,Performance,My leaves,Applications', navLabels().join())
+    navLabels().join() === 'Dashboard,Handbook,Resources,Profile,My leaves,Org chart,Performance,Applications', navLabels().join())
 
 reset()
 signInAs(PEOPLE.member)
@@ -196,10 +197,10 @@ reset()
 signInAs(PEOPLE.hr)
 await mountApp('/')
 check('HR lands on the dashboard', location.pathname === '/dashboard', location.pathname)
-check('HR is offered people, leave, HR, payroll and equipment pages, only Leaves, Holidays and Announcements under company settings, and only Vendors under configuration',
+check('HR is offered their own reimbursements, people, leave, HR, payroll, reimbursements and equipment pages, only Leaves, Holidays and Announcements under company settings, and only Vendors under configuration',
   navLabels().join() ===
-    'Dashboard,Handbook,Resources,Profile,Employees,Org chart,Performance,Appraisals,My leaves,Leave requests,Job openings,' +
-      'Applications,Onboarding,Offboarding,Payroll,Equipment,Leaves,Holidays,Announcements,Vendors',
+    'Dashboard,Handbook,Resources,Profile,My leaves,My reimbursements,Employees,Org chart,Performance,Appraisals,Leave requests,Job openings,' +
+      'Applications,Onboarding,Offboarding,Payroll,Reimbursements,Equipment,Leaves,Holidays,Announcements,Vendors',
   navLabels().join())
 
 reset()
@@ -260,8 +261,8 @@ await mountApp('/company/departments')
 check('a company admin reaches company settings', location.pathname === '/company/departments', location.pathname)
 check('a company admin is offered everything',
   navLabels().join() ===
-    'Dashboard,Handbook,Resources,Profile,Employees,Org chart,Performance,Appraisals,My leaves,Leave requests,Job openings,' +
-      'Applications,Onboarding,Offboarding,Payroll,Equipment,Departments,Designations,KPIs,Expectations,Leaves,Holidays,Announcements,Branding,' +
+    'Dashboard,Handbook,Resources,Profile,My leaves,My reimbursements,Employees,Org chart,Performance,Appraisals,Leave requests,Job openings,' +
+      'Applications,Onboarding,Offboarding,Payroll,Reimbursements,Equipment,Departments,Designations,KPIs,Expectations,Leaves,Holidays,Announcements,Branding,' +
       'Onboarding,Offboarding,Vendors',
   navLabels().join())
 
@@ -270,8 +271,9 @@ reset()
 offHiringTeam()
 signInAs(FINANCE)
 await mountApp('/')
-check('a finance admin is offered what a member is, plus payroll, equipment and vendors',
-  navLabels().join() === 'Dashboard,Handbook,Resources,Profile,Org chart,Performance,My leaves,Payroll,Equipment,Vendors', navLabels().join())
+check('a finance admin is offered what a member is, plus their own reimbursements, payroll, reimbursements, equipment and vendors',
+  navLabels().join() === 'Dashboard,Handbook,Resources,Profile,My leaves,My reimbursements,Org chart,Performance,Payroll,Reimbursements,Equipment,Vendors',
+  navLabels().join())
 check('…and the header names the role', text().includes('Finance Admin'))
 
 reset()

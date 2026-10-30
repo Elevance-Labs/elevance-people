@@ -12,6 +12,7 @@ import type {
   OffboardingReason,
   OnboardingStatus,
   PayrollStatus,
+  ReimbursementStatus,
   SalaryRevisionStatus,
 } from './types'
 
@@ -187,6 +188,24 @@ export const EQUIPMENT_STATUS_COLORS: Record<EquipmentStatus, ChipProps['color']
   sold: 'default',
 }
 
+export const REIMBURSEMENT_STATUS_LABELS: Record<ReimbursementStatus, string> = {
+  review: 'In review',
+  approved: 'Approved',
+  processed: 'Processed',
+  disbursed: 'Disbursed',
+  rejected: 'Rejected',
+  withdrawn: 'Withdrawn',
+}
+
+export const REIMBURSEMENT_STATUS_COLORS: Record<ReimbursementStatus, ChipProps['color']> = {
+  review: 'warning',
+  approved: 'info',
+  processed: 'primary',
+  disbursed: 'success',
+  rejected: 'error',
+  withdrawn: 'default',
+}
+
 export function formatPkr(amount: number) {
   return `PKR ${amount.toLocaleString('en-PK')}`
 }
@@ -216,6 +235,11 @@ export const LOGO_MAX_BYTES = 2 * 1024 * 1024
 export const EQUIPMENT_PHOTO_ACCEPT = 'image/jpeg,image/png,image/webp'
 export const EQUIPMENT_INVOICE_ACCEPT = `${EQUIPMENT_PHOTO_ACCEPT},application/pdf`
 export const EQUIPMENT_FILE_MAX_BYTES = 10 * 1024 * 1024
+
+// Mirrored by the reimbursements bucket's limits: receipts and proof of
+// payment are images or PDFs.
+export const REIMBURSEMENT_FILE_ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf'
+export const REIMBURSEMENT_FILE_MAX_BYTES = 10 * 1024 * 1024
 
 export function formatEmployeeNumber(n: number) {
   return `#${String(n).padStart(4, '0')}`

@@ -42,6 +42,10 @@ create type public.feedback_kind as enum ('appreciation', 'improvement', 'genera
 create type public.peer_cycle_status as enum ('draft', 'open', 'closed');
 -- What a department does for the company; groups the Resources page's guides.
 create type public.business_function as enum ('production', 'growth', 'operations');
+-- A reimbursement claim: in review, then approved by HR, processed and
+-- disbursed by finance; or rejected, or withdrawn by its employee.
+create type public.reimbursement_status as enum
+  ('review', 'approved', 'processed', 'disbursed', 'rejected', 'withdrawn');
 
 -- ---------------------------------------------------------------------------
 -- Company configuration: departments, designations (each in a department),
@@ -140,6 +144,8 @@ create table public.employees (
   department_id      uuid,
   designation_id     uuid,
   login_method       public.login_method not null default 'google',
+  -- Set by HR: may claim reimbursements.
+  can_claim_reimbursements boolean not null default false,
   -- Company addresses always sign in with Google; anything else only by password.
   constraint employees_company_email_check
     check (company_email = lower(company_email)
@@ -764,6 +770,57 @@ create unique index equipment_assignments_open
 create index equipment_assignments_employee_idx on public.equipment_assignments (employee_id);
 
 -- ---------------------------------------------------------------------------
+-- Reimbursements: employees HR allows claim back what they spent for work,
+-- with one to three receipts; HR, finance and company admins may claim for
+-- themselves or anyone who may log in. A claim is in review until HR approves or
+-- rejects it; finance then marks it processed (or rejects it) and disbursed,
+-- with how it was paid. The employee may withdraw it while in review.
+-- ---------------------------------------------------------------------------
+-- Inserted by the employee (in review); every later change is by the functions below.
+create table public.reimbursements (
+  id                     uuid primary key default gen_random_uuid(),
+  employee_id            uuid not null,
+  description            text not null
+                         check (description = trim(description) and description <> '' and length(description) <= 2000),
+  expense_date           date not null,
+  -- PKR.
+  amount                 numeric(12, 2) not null check (amount > 0),
+  -- 1–3 files in the reimbursements bucket, in the employee's folder.
+  receipt_paths          text[] not null
+                         check (cardinality(receipt_paths) between 1 and 3 and array_position(receipt_paths, null) is null),
+  status                 public.reimbursement_status not null default 'review',
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now(),
+  approved_by            uuid references public.employees (id) on delete set null,
+  approved_at            timestamptz,
+  processed_by           uuid references public.employees (id) on delete set null,
+  processed_at           timestamptz,
+  disbursed_by           uuid references public.employees (id) on delete set null,
+  disbursed_at           timestamptz,
+  rejected_by            uuid references public.employees (id) on delete set null,
+  rejected_at            timestamptz,
+  rejection_reason       text check (length(rejection_reason) <= 2000),
+  withdrawn_at           timestamptz,
+  -- How it was paid, set on disbursal: the date, and a reference or a proof
+  -- file (in the bucket, in the employee's folder), or both.
+  transaction_date       date,
+  transaction_reference  text check (length(transaction_reference) <= 200),
+  transaction_proof_path text,
+  -- Who made the claim: the employee, or a payroll role for them. Stamped by
+  -- reimbursements_guard.
+  created_by             uuid references public.employees (id) on delete set null,
+  -- Named: reimbursements references employees several times.
+  constraint reimbursements_employee_id_fkey foreign key (employee_id)
+    references public.employees (id) on delete cascade,
+  constraint reimbursements_disbursal_check
+    check (status <> 'disbursed'
+           or (transaction_date is not null
+               and (transaction_reference is not null or transaction_proof_path is not null)))
+);
+create index reimbursements_employee_idx on public.reimbursements (employee_id);
+create index reimbursements_status_idx on public.reimbursements (status);
+
+-- ---------------------------------------------------------------------------
 -- Performance: monthly reviews. In the first ten days of each month, every
 -- employee's org chart manager reviews the month before: KPIs rated 1–5,
 -- expectations met or not, an evaluation, feedback and the quarterly goal.
@@ -1030,6 +1087,14 @@ $$;
 create function public.can_manage_operations()
 returns boolean language sql stable set search_path = '' as $$
   select public.is_hr() or public.is_finance();
+$$;
+
+-- HR's flag, or a payroll role (HR, finance and company admins).
+create or replace function public.can_claim_reimbursements()
+returns boolean language sql stable security definer set search_path = '' as $$
+  select public.can_manage_payroll()
+         or coalesce((select e.can_claim_reimbursements from public.employees e
+                       where e.id = public.current_employee_id()), false);
 $$;
 
 -- The caller's department's business function, if any.
@@ -1580,6 +1645,55 @@ $$;
 create trigger equipment_guard
   before insert or update on public.equipment
   for each row execute function public.equipment_guard();
+
+-- A new claim: for someone who may log in, made by themselves while they
+-- may claim, or by a payroll role for anyone; for a day that has come, with
+-- receipts already uploaded into the employee's folder and on no other
+-- claim. Stamps who made it.
+create or replace function public.reimbursements_guard()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare
+  v_me   uuid := public.current_employee_id();
+  v_path text;
+begin
+  -- auth.uid() is null for the SQL editor / service role: anyone may be claimed for.
+  if auth.uid() is not null
+     and not public.can_manage_payroll()
+     and not (new.employee_id = v_me and public.can_claim_reimbursements()) then
+    raise exception 'You can''t claim reimbursements. Ask HR if you think you should.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.employees e
+                  where e.id = new.employee_id and public.is_login_status(e.status)) then
+    raise exception 'Claims can only be made for someone on probation, active or on their notice period.'
+      using errcode = '23514';
+  end if;
+  if new.expense_date > public.company_today() then
+    raise exception 'The expense date can''t be in the future.' using errcode = '23514';
+  end if;
+  if (select count(distinct p) from unnest(new.receipt_paths) p) <> cardinality(new.receipt_paths) then
+    raise exception 'The same receipt is attached twice.' using errcode = '23514';
+  end if;
+  foreach v_path in array new.receipt_paths loop
+    if split_part(v_path, '/', 1) <> new.employee_id::text
+       or not exists (select 1 from storage.objects o
+                       where o.bucket_id = 'reimbursements' and o.name = v_path) then
+      raise exception 'Upload the receipts before submitting the claim.';
+    end if;
+  end loop;
+  if exists (select 1 from public.reimbursements r where r.receipt_paths && new.receipt_paths) then
+    raise exception 'A receipt is already on another claim.' using errcode = '23505';
+  end if;
+  new.created_by := v_me;
+  return new;
+end;
+$$;
+
+create trigger reimbursements_guard
+  before insert on public.reimbursements
+  for each row execute function public.reimbursements_guard();
+
+create trigger reimbursements_touch before update on public.reimbursements
+  for each row execute function public.touch_updated_at();
 
 -- ---------------------------------------------------------------------------
 -- Leave actions (RPCs). The only way a leave's status or approvals change.
@@ -2491,6 +2605,117 @@ language sql stable security definer set search_path = '' as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Reimbursement actions (RPCs). The only way a claim changes status.
+-- ---------------------------------------------------------------------------
+
+-- Moves a claim: review → approved or rejected (HR), approved → processed or
+-- rejected (finance), review → withdrawn (its employee, or whoever made it).
+-- Rejecting needs a reason. Nobody decides a claim they are the employee of
+-- or made.
+create or replace function public.reimbursement_move(
+  p_reimbursement_id uuid, p_status public.reimbursement_status, p_reason text default null)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_me     uuid := public.current_employee_id();
+  v_claim  public.reimbursements;
+  v_reason text := nullif(trim(p_reason), '');
+  v_own    boolean;
+begin
+  select * into v_claim from public.reimbursements where id = p_reimbursement_id for update;
+  v_own := coalesce(v_me in (v_claim.employee_id, v_claim.created_by), false);
+  if not found or not (v_own or public.can_manage_payroll()) then
+    raise exception 'Claim not found.' using errcode = 'P0002';
+  end if;
+
+  if p_status = 'withdrawn' then
+    if not v_own then
+      raise exception 'Only the employee, or whoever made the claim, can withdraw it.' using errcode = '42501';
+    end if;
+    if v_claim.status <> 'review' then
+      raise exception 'Only a claim in review can be withdrawn.';
+    end if;
+    update public.reimbursements set status = 'withdrawn', withdrawn_at = now() where id = p_reimbursement_id;
+    return;
+  end if;
+
+  if v_own then
+    raise exception 'Someone else has to decide a claim that is yours or that you made.' using errcode = '42501';
+  end if;
+  if v_claim.status = 'review' and p_status in ('approved', 'rejected') then
+    if not public.is_hr() then
+      raise exception 'Only HR can approve or reject a claim in review.' using errcode = '42501';
+    end if;
+  elsif v_claim.status = 'approved' and p_status in ('processed', 'rejected') then
+    if not public.is_finance() then
+      raise exception 'Only finance can process or reject an approved claim.' using errcode = '42501';
+    end if;
+  else
+    raise exception 'A claim can''t move from % to %.', v_claim.status, p_status;
+  end if;
+
+  if p_status = 'rejected' then
+    if v_reason is null then
+      raise exception 'Give a reason for rejecting the claim.' using errcode = '23514';
+    end if;
+    update public.reimbursements
+       set status = 'rejected', rejected_by = v_me, rejected_at = now(), rejection_reason = v_reason
+     where id = p_reimbursement_id;
+  elsif p_status = 'approved' then
+    update public.reimbursements set status = 'approved', approved_by = v_me, approved_at = now()
+     where id = p_reimbursement_id;
+  else
+    update public.reimbursements set status = 'processed', processed_by = v_me, processed_at = now()
+     where id = p_reimbursement_id;
+  end if;
+end;
+$$;
+
+-- Finance marks a processed claim disbursed: the transaction date (not in the
+-- future) and a reference, or proof of payment uploaded into the employee's
+-- folder, or both. Not a claim they are the employee of or made. Final.
+create or replace function public.reimbursement_disburse(
+  p_reimbursement_id uuid, p_transaction_date date, p_reference text, p_proof_path text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_me        uuid := public.current_employee_id();
+  v_claim     public.reimbursements;
+  v_reference text := nullif(trim(p_reference), '');
+  v_proof     text := nullif(p_proof_path, '');
+begin
+  select * into v_claim from public.reimbursements where id = p_reimbursement_id for update;
+  if not found or not public.can_manage_payroll() then
+    raise exception 'Claim not found.' using errcode = 'P0002';
+  end if;
+  if not public.is_finance() then
+    raise exception 'Only finance can mark a claim disbursed.' using errcode = '42501';
+  end if;
+  if coalesce(v_me in (v_claim.employee_id, v_claim.created_by), false) then
+    raise exception 'Someone else has to decide a claim that is yours or that you made.' using errcode = '42501';
+  end if;
+  if v_claim.status <> 'processed' then
+    raise exception 'Only a processed claim can be disbursed.';
+  end if;
+  if p_transaction_date is null or p_transaction_date > public.company_today() then
+    raise exception 'Enter the transaction date (today or earlier).' using errcode = '23514';
+  end if;
+  if v_reference is null and v_proof is null then
+    raise exception 'Enter the transaction reference or upload proof of payment.' using errcode = '23514';
+  end if;
+  if v_proof is not null
+     and (split_part(v_proof, '/', 1) <> v_claim.employee_id::text
+          or not exists (select 1 from storage.objects o
+                          where o.bucket_id = 'reimbursements' and o.name = v_proof)) then
+    raise exception 'Upload the proof of payment first.';
+  end if;
+
+  update public.reimbursements
+     set status = 'disbursed', disbursed_by = v_me, disbursed_at = now(), transaction_date = p_transaction_date,
+         transaction_reference = v_reference, transaction_proof_path = v_proof
+   where id = p_reimbursement_id;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Payslips: an employee's own lines once a payroll is disbursed. The payroll
 -- tables stay HR and finance only.
 -- ---------------------------------------------------------------------------
@@ -3359,7 +3584,8 @@ revoke all on public.employees, public.employee_documents, public.org_chart_node
               public.performance_review_expectations, public.manager_notes, public.guides,
               public.hr_feedback, public.peer_review_cycles, public.peer_review_questions,
               public.peer_review_assignments, public.peer_review_answers,
-              public.manager_feedback_questions, public.manager_feedback, public.manager_feedback_answers
+              public.manager_feedback_questions, public.manager_feedback, public.manager_feedback_answers,
+              public.reimbursements
   from anon, authenticated;
 
 grant select, delete on public.employees to authenticated;
@@ -3369,7 +3595,8 @@ grant insert (full_name, company_email, date_of_joining, date_of_separation, per
               emergency_contact, employment_type, status, app_role, login_method),
       update (full_name, company_email, date_of_joining, date_of_separation, personal_email,
               phone, cnic_number, cnic_expiry, dob, department_id, designation_id, bank, iban,
-              emergency_contact, employment_type, status, app_role, login_method)
+              emergency_contact, employment_type, status, app_role, login_method,
+              can_claim_reimbursements)
   on public.employees to authenticated;
 
 grant select on public.employee_documents to authenticated;
@@ -3468,6 +3695,10 @@ grant insert (name, identifier, status, purchase_date, vendor_id, invoice_path, 
   on public.equipment to authenticated;
 grant select on public.equipment_assignments to authenticated;
 
+-- Status, stamps and payment details change only through the functions above.
+grant select, insert (employee_id, description, expense_date, amount, receipt_paths)
+  on public.reimbursements to authenticated;
+
 -- Reviews are created and change status only through the functions above;
 -- while a draft, the manager writes these columns (RLS).
 grant select, update (evaluation, feedback, goal_set, goal_progress) on public.performance_reviews to authenticated;
@@ -3548,7 +3779,10 @@ revoke execute on function
   public.peer_review_submit(uuid), public.my_peer_feedback(), public.is_peer_reviewer_in(uuid),
   public.peer_cycle_status_of(uuid),
   public.quarter_end(integer, integer), public.manager_feedback_questions_guard(), public.manager_feedback_guard(),
-  public.manager_feedback_start(), public.manager_feedback_submit(uuid), public.manager_feedback_due(integer, integer)
+  public.manager_feedback_start(), public.manager_feedback_submit(uuid), public.manager_feedback_due(integer, integer),
+  public.can_claim_reimbursements(), public.reimbursements_guard(),
+  public.reimbursement_move(uuid, public.reimbursement_status, text),
+  public.reimbursement_disburse(uuid, date, text, text)
   from public, anon, authenticated;
 
 grant execute on function
@@ -3587,7 +3821,10 @@ grant execute on function
   public.peer_review_submit(uuid), public.my_peer_feedback(), public.is_peer_reviewer_in(uuid),
   public.peer_cycle_status_of(uuid),
   public.quarter_end(integer, integer), public.manager_feedback_start(), public.manager_feedback_submit(uuid),
-  public.manager_feedback_due(integer, integer)
+  public.manager_feedback_due(integer, integer),
+  public.can_claim_reimbursements(),
+  public.reimbursement_move(uuid, public.reimbursement_status, text),
+  public.reimbursement_disburse(uuid, date, text, text)
   to authenticated;
 
 -- An employee's own payslips.
@@ -3654,6 +3891,7 @@ alter table public.manager_feedback_questions enable row level security;
 alter table public.manager_feedback enable row level security;
 alter table public.manager_feedback_answers enable row level security;
 alter table public.guides enable row level security;
+alter table public.reimbursements enable row level security;
 
 -- Employees: HR/company admins see and edit all; members see only themselves.
 create policy employees_select on public.employees for select to authenticated
@@ -3918,6 +4156,15 @@ create policy equipment_delete on public.equipment
 create policy equipment_assignments_select on public.equipment_assignments
   for select to authenticated using ((select public.can_manage_operations()));
 
+-- Reimbursements: the employee their own; HR and finance all. Inserted for
+-- oneself while allowed to claim, or by HR and finance for anyone (the guard
+-- checks that too). Status changes only through the functions.
+create policy reimbursements_select on public.reimbursements for select to authenticated
+  using (employee_id = (select public.current_employee_id()) or (select public.can_manage_payroll()));
+create policy reimbursements_insert on public.reimbursements for insert to authenticated
+  with check ((select public.can_manage_payroll())
+              or (employee_id = (select public.current_employee_id()) and (select public.can_claim_reimbursements())));
+
 -- HR reads every review but drafts of their own; the employee's current
 -- manager reads all of theirs and edits drafts; the employee reads their own
 -- once submitted.
@@ -4100,3 +4347,31 @@ create policy equipment_files_upload on storage.objects for insert to authentica
   with check (bucket_id = 'equipment' and (select public.can_manage_operations()));
 create policy equipment_files_delete on storage.objects for delete to authenticated
   using (bucket_id = 'equipment' and (select public.can_manage_operations()));
+
+-- ---------------------------------------------------------------------------
+-- Storage: reimbursement receipts and proof of payment (private,
+-- <employee_id>/<uuid>.<ext>). The employee uploads receipts into their own
+-- folder; HR and finance upload receipts and proof into anyone's. The
+-- employee, HR and finance read them. A file goes only while no claim points at it. Nothing
+-- is overwritten.
+-- ---------------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('reimbursements', 'reimbursements', false, 10485760,
+        array['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+on conflict (id) do nothing;
+
+create policy reimbursement_files_read on storage.objects for select to authenticated
+  using (bucket_id = 'reimbursements'
+         and ((storage.foldername(name))[1] = (select public.current_employee_id())::text
+              or (select public.can_manage_payroll())));
+create policy reimbursement_files_upload on storage.objects for insert to authenticated
+  with check (bucket_id = 'reimbursements'
+              and (((storage.foldername(name))[1] = (select public.current_employee_id())::text
+                    and (select public.can_claim_reimbursements()))
+                   or (select public.can_manage_payroll())));
+create policy reimbursement_files_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'reimbursements'
+         and ((storage.foldername(name))[1] = (select public.current_employee_id())::text
+              or (select public.can_manage_payroll()))
+         and not exists (select 1 from public.reimbursements r
+                          where objects.name = any (r.receipt_paths) or r.transaction_proof_path = objects.name));

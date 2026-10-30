@@ -37,12 +37,14 @@ import KeyOutlinedIcon from '@mui/icons-material/KeyOutlined'
 import HowToRegOutlinedIcon from '@mui/icons-material/HowToRegOutlined'
 import PersonRemoveOutlinedIcon from '@mui/icons-material/PersonRemoveOutlined'
 import PlaylistRemoveOutlinedIcon from '@mui/icons-material/PlaylistRemoveOutlined'
+import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined'
 import RequestQuoteOutlinedIcon from '@mui/icons-material/RequestQuoteOutlined'
 import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined'
 import LogoutIcon from '@mui/icons-material/Logout'
 import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined'
 import MenuIcon from '@mui/icons-material/Menu'
 import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined'
+import PriceCheckOutlinedIcon from '@mui/icons-material/PriceCheckOutlined'
 import PaletteOutlinedIcon from '@mui/icons-material/PaletteOutlined'
 import PeopleOutlineIcon from '@mui/icons-material/PeopleOutlined'
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlined'
@@ -73,6 +75,8 @@ interface NavItem {
   payrollOnly?: boolean
   // HR, finance admins and company admins.
   operationsOnly?: boolean
+  // Whoever HR allows to claim reimbursements.
+  claimantsOnly?: boolean
 }
 
 // A section shows when the person may see at least one of its items.
@@ -89,6 +93,8 @@ const NAV: NavSection[] = [
       { to: '/handbook', label: 'Handbook', icon: <MenuBookOutlinedIcon /> },
       { to: '/resources', label: 'Resources', icon: <LightbulbOutlinedIcon /> },
       { to: '/profile', label: 'Profile', icon: <PersonOutlineIcon /> },
+      { to: '/leaves', label: 'My leaves', icon: <BeachAccessOutlinedIcon /> },
+      { to: '/reimbursements', label: 'My reimbursements', icon: <ReceiptLongOutlinedIcon />, claimantsOnly: true },
     ],
   },
   {
@@ -103,7 +109,6 @@ const NAV: NavSection[] = [
   {
     title: 'Leaves',
     items: [
-      { to: '/leaves', label: 'My leaves', icon: <BeachAccessOutlinedIcon /> },
       { to: '/leaves/requests', label: 'Leave requests', icon: <EventAvailableOutlinedIcon />, approversOnly: true },
     ],
   },
@@ -124,7 +129,10 @@ const NAV: NavSection[] = [
   },
   {
     title: 'Finance',
-    items: [{ to: '/finance/payroll', label: 'Payroll', icon: <PaymentsOutlinedIcon />, payrollOnly: true }],
+    items: [
+      { to: '/finance/payroll', label: 'Payroll', icon: <PaymentsOutlinedIcon />, payrollOnly: true },
+      { to: '/finance/reimbursements', label: 'Reimbursements', icon: <PriceCheckOutlinedIcon />, payrollOnly: true },
+    ],
   },
   {
     title: 'Operations',
@@ -165,6 +173,7 @@ export default function Layout() {
     isHiringTeam,
     canManagePayroll,
     canManageOperations,
+    canClaimReimbursements,
     recovering,
     endRecovery,
     signOut,
@@ -207,7 +216,8 @@ export default function Layout() {
             (isHr || isHiringTeam || !item.hiringTeamOnly) &&
             (isCompanyAdmin || !item.companyAdminOnly) &&
             (canManagePayroll || !item.payrollOnly) &&
-            (canManageOperations || !item.operationsOnly),
+            (canManageOperations || !item.operationsOnly) &&
+            (canClaimReimbursements || !item.claimantsOnly),
         )
         if (!items.length) return null
         return (

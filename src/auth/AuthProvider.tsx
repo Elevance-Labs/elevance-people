@@ -15,6 +15,9 @@ interface AuthState {
   canManagePayroll: boolean
   // HR or finance: manages equipment and vendors.
   canManageOperations: boolean
+  // May claim reimbursements: HR's flag on the employee row read at sign-in,
+  // or HR / finance, who may also claim for others.
+  canClaimReimbursements: boolean
   // Has direct reports in the org chart, so approves their leaves. Read at sign-in.
   isManager: boolean
   // Hiring manager or interviewer on any job, so sees its applications. Read at sign-in.
@@ -111,6 +114,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isFinance: role === 'finance_admin' || role === 'company_admin',
       canManagePayroll: role === 'hr_admin' || role === 'finance_admin' || role === 'company_admin',
       canManageOperations: role === 'hr_admin' || role === 'finance_admin' || role === 'company_admin',
+      canClaimReimbursements:
+        employee?.can_claim_reimbursements === true ||
+        role === 'hr_admin' ||
+        role === 'finance_admin' ||
+        role === 'company_admin',
       isManager,
       isHiringTeam,
       recovering,

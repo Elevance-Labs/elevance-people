@@ -32,6 +32,8 @@ export interface Employee {
   status: EmployeeStatus
   app_role: AppRole
   login_method: LoginMethod
+  // Set by HR: may claim reimbursements.
+  can_claim_reimbursements: boolean
   created_at: string
   updated_at: string
 }
@@ -507,6 +509,40 @@ export interface MyEquipment {
   name: string
   identifier: string
   assigned_on: string
+}
+
+export type ReimbursementStatus = 'review' | 'approved' | 'processed' | 'disbursed' | 'rejected' | 'withdrawn'
+
+// A claim for money spent for work. Inserted by the employee (in review);
+// status, stamps and payment details change only through
+// reimbursement_move / reimbursement_disburse. Money is PKR.
+export interface Reimbursement {
+  id: string
+  employee_id: string
+  description: string
+  expense_date: string
+  amount: number
+  // 1–3 files in the reimbursements bucket, at <employee_id>/<uuid>.<ext>.
+  receipt_paths: string[]
+  status: ReimbursementStatus
+  created_at: string
+  updated_at: string
+  approved_by: string | null
+  approved_at: string | null
+  processed_by: string | null
+  processed_at: string | null
+  disbursed_by: string | null
+  disbursed_at: string | null
+  rejected_by: string | null
+  rejected_at: string | null
+  rejection_reason: string | null
+  withdrawn_at: string | null
+  // How it was paid: the date, and a reference or proof file (or both).
+  transaction_date: string | null
+  transaction_reference: string | null
+  transaction_proof_path: string | null
+  // Who made it: the employee, or HR / finance for them.
+  created_by: string | null
 }
 
 export type ReviewStatus = 'draft' | 'submitted'

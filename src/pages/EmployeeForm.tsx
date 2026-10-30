@@ -22,6 +22,7 @@ import { useAuth } from '../auth/AuthProvider'
 import Documents from '../components/Documents'
 import { ConfirmDialog, FormDialog, PageHeader, PersonAvatar, StatusChip } from '../components/common'
 import { DOCS_BUCKET, supabase } from '../lib/supabase'
+import { removeReimbursementFiles } from '../lib/reimbursements'
 import {
   APP_ROLE_LABELS,
   COMPANY_DOMAIN,
@@ -217,11 +218,11 @@ export default function EmployeeForm() {
     setBusy(true)
     setError(null)
 
-    const docs = await supabase
-      .from('employee_documents')
-      .select('storage_path')
-      .eq('employee_id', employee.id)
-    let failure = docs.error
+    const [docs, claims] = await Promise.all([
+      supabase.from('employee_documents').select('storage_path').eq('employee_id', employee.id),
+      supabase.from('reimbursements').select('receipt_paths, transaction_proof_path').eq('employee_id', employee.id),
+    ])
+    let failure = docs.error ?? claims.error
     if (!failure) failure = (await supabase.from('employees').delete().eq('id', employee.id)).error
     setBusy(false)
     setConfirmDelete(false)
@@ -231,6 +232,9 @@ export default function EmployeeForm() {
     // way, so a failure here leaves only unreachable files behind.
     const paths = (docs.data ?? []).map((d) => d.storage_path as string)
     if (paths.length) await supabase.storage.from(DOCS_BUCKET).remove(paths)
+    await removeReimbursementFiles(
+      (claims.data ?? []).flatMap((c) => [...(c.receipt_paths as string[]), c.transaction_proof_path as string | null]),
+    )
     navigate('/employees', { replace: true })
   }
 

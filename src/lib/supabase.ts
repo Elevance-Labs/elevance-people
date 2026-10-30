@@ -18,3 +18,5 @@ export const APPLICATIONS_BUCKET = 'job-applications'
 export const BRANDING_BUCKET = 'branding'
 // Private: equipment invoices and photos, for whoever manages equipment.
 export const EQUIPMENT_BUCKET = 'equipment'
+// Private: reimbursement receipts and proof of payment, at <employee_id>/<uuid>.<ext>.
+export const REIMBURSEMENTS_BUCKET = 'reimbursements'

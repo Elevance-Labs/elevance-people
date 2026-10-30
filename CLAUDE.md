@@ -19,7 +19,8 @@ behaviour).
   **leaves** (types,
   quotas, requests, two-step approval, public holidays), **hiring** (job openings, each with a
   public application page; an applications board with stages), **human
-  resources** (onboarding, offboarding with HR and manager sign-off), **finance** (payroll),
+  resources** (onboarding, offboarding with HR and manager sign-off), **finance** (payroll,
+  reimbursements),
   **operations** (equipment and its assignments), **company settings**
   (departments, designations, KPIs, expectations, holidays, announcements, branding), and
   **configuration** (the onboarding and offboarding checklists, vendors).
@@ -76,6 +77,13 @@ behaviour).
   only through `my_peer_feedback` (anonymised). Feedback on one's manager is
   made only by `manager_feedback_start` and submitted only by
   `manager_feedback_submit` (final); nothing sets a quarter up.
+  A reimbursement claim is inserted in review, by its employee while HR
+  allows them to claim, or by a payroll role for anyone who may log in
+  (`reimbursements_guard`, which stamps the creator); it moves only through
+  `reimbursement_move` (approve / reject by HR, process / reject by finance,
+  withdraw by the employee or creator) and `reimbursement_disburse`
+  (finance, with the payment details). Nobody decides a claim they are the
+  employee of or made.
 - **Column grants also hide.** Clients can't select
   `job_applications.expected_salary`, `current_salary` or `hr_notes`; HR and
   the hiring manager read them via `application_hr_details`, and only HR
@@ -103,7 +111,7 @@ behaviour).
 | `src/pages/leaves/` | Leaves pages: own leaves, requests to approve. |
 | `src/pages/hiring/` | Job openings list and form (HR); applications board and its dialog. |
 | `src/pages/hr/` | Human Resources pages: onboarding list and detail (HR); offboarding list and detail (HR, and managers). |
-| `src/pages/finance/` | Finance pages (HR, finance admins, company admins): payroll list and one payroll. |
+| `src/pages/finance/` | Finance pages: payroll list and one payroll, reimbursements (HR, finance admins, company admins); my reimbursements (whoever HR allows to claim). |
 | `src/pages/operations/` | Operations pages (HR, finance admins, company admins): equipment list and one item. |
 | `src/pages/performance/` | Performance: the tabbed page (Me, My team, People), one review, one person's history. |
 | `src/pages/configuration/` | Configuration pages: the onboarding and offboarding checklists (one page, by kind; company admins); vendors (HR, finance admins, company admins). |
@@ -185,6 +193,13 @@ behaviour).
 - `/finance/payroll` — HR, finance admins, company admins: payrolls by month,
   start a new one. `/finance/payroll/:id` — one payroll's lines: edit, add,
   remove (draft only), status moves, CSV download (built in the browser).
+- `/finance/reimbursements` — HR, finance admins, company admins: tab
+  *Claims* (everyone's, by `?status=`; review by default for HR, approved
+  for finance; a row opens the claim and its actions), tab *Who can claim*
+  (HR: the flag per person), tab in `?tab=`. `/reimbursements` — whoever
+  HR allows to claim (flag read at sign-in), and payroll roles: own claims
+  (payroll roles: also those they made), new claim with receipts (payroll
+  roles: *Claim for* anyone, themselves by default), withdraw while in review.
 - `/operations/equipment` — HR, finance admins, company admins: equipment
   (`?status=` filter, search). `/operations/equipment/new`, `/:id` — details,
   invoice and photo, delete; assign / reassign / unassign, history.
@@ -202,13 +217,13 @@ behaviour).
 - Unknown paths redirect to `/dashboard`.
 - Gating is by **not registering** routes in `src/App.tsx`; the nav in
   `components/Layout.tsx` hides the same items (`hrOnly`, `approversOnly`,
-  `hiringTeamOnly`, `companyAdminOnly`, `payrollOnly`, `operationsOnly`, per item; a section with no visible items is hidden).
+  `hiringTeamOnly`, `companyAdminOnly`, `payrollOnly`, `operationsOnly`, `claimantsOnly`, per item; a section with no visible items is hidden).
 
 ## 5. Shared state
 
 | Provider | Supplies | Scope |
 |---|---|---|
-| `AuthProvider` | `loading`, `employee`, `error`, `isHr`, `isCompanyAdmin`, `isFinance`, `canManagePayroll`, `canManageOperations`, `isManager`, `isHiringTeam`, `recovering`, `endRecovery`, `signIn`, `signInWithPassword`, `signOut` | Whole app |
+| `AuthProvider` | `loading`, `employee`, `error`, `isHr`, `isCompanyAdmin`, `isFinance`, `canManagePayroll`, `canManageOperations`, `canClaimReimbursements`, `isManager`, `isHiringTeam`, `recovering`, `endRecovery`, `signIn`, `signInWithPassword`, `signOut` | Whole app |
 
 - A Supabase session alone is not a login: after sign-in the provider calls
   `bind_employee`; no row back → error shown and the user is signed out.
@@ -217,6 +232,8 @@ behaviour).
   page and the offboarding pages — RLS decides what a manager sees.
 - `isHiringTeam` (hiring manager or interviewer on any job, RPC
   `on_hiring_team`) is read the same way and only gates the applications page.
+- `canClaimReimbursements` is the bound row's flag or a payroll role, so it
+  too changes at the next sign-in; it only gates *My reimbursements*.
 - There is no other global state; pages load what they need.
 
 ## 6. Modules (`src/lib/`, `src/components/`)
@@ -253,6 +270,9 @@ behaviour).
 - `managerFeedback.ts` — feedback-on-manager select, a quarter's window
   (opens, due, closes — mirrors of the SQL), a form's state, recent
   quarters, the question limits, error messages.
+- `reimbursements.ts` — claim select, what a viewer may do to a claim
+  (mirror of `reimbursement_move` / `_disburse`), the receipt and reference
+  limits, file checks, reimbursements-bucket upload / remove, error messages.
 - `payslip.ts` — the payslip PDF (jsPDF, imported dynamically so it loads
   only on download).
 - `equipment.ts` — equipment select (named vendor FK), vendor select with
@@ -288,6 +308,9 @@ behaviour).
 - `components/ManagerFeedback.tsx` — the employee's card for this quarter's
   feedback on their manager (Me tab), and HR's tab: who owes it, averages
   per manager with names, the questions.
+- `components/Reimbursements.tsx` — claim status chip, and the claim dialog
+  (details, receipts, history, and the viewer's actions: withdraw, approve,
+  reject, process, disburse); shared by both reimbursement pages.
 - `components/RichText.tsx` — TipTap editor with toolbar (heavy: only the
   lazy job form and announcements pages import it). `components/RichTextView.tsx` — sanitised read-only HTML.
 - `components/common.tsx` — logo, avatar, status chips, page header, confirm and
@@ -309,7 +332,7 @@ Full detail in `supabase/schema.sql`.
   `login_method` (`google`, the default: company domain only; `password`:
   an outside address only, check constraint). Statuses
   `probation` / `active` / `notice_period` may log in (`is_login_status`).
-  Linked to a department and a designation (both optional; a designation needs
+  `can_claim_reimbursements` is set by HR. Linked to a department and a designation (both optional; a designation needs
   its department, and the FK keeps them consistent). HR reads/writes all; a
   member reads only their own row.
 - `employee_documents` — metadata for files in the private `employee-docs`
@@ -413,6 +436,19 @@ Full detail in `supabase/schema.sql`.
   unassigns (FK set null) and drops their history rows. `my_equipment` — the
   caller's items (name, identifier, date); the only way an employee reads
   equipment.
+- `reimbursements` — one claim: description, expense date, amount, 1–3
+  receipt paths in the private `reimbursements` bucket at
+  `<employee_id>/…`, and who made it (`created_by`). Status `review` → `approved` → `processed` →
+  `disbursed`, or `rejected` (reason) / `withdrawn`, only via
+  `reimbursement_move` / `reimbursement_disburse` (transaction date, and a
+  reference or proof file). `reimbursements_guard` (insert): the caller
+  claims for themselves while allowed (`can_claim_reimbursements()`: the
+  flag or a payroll role) or is a payroll role, the employee may log in,
+  date not in the future, receipts uploaded in their folder and on no
+  other claim; stamps `created_by`. RLS: the employee their own, payroll
+  roles all; insert for oneself, or payroll roles for anyone. Bucket: the
+  employee uploads to their folder, payroll roles to anyone's; a file
+  goes only while no claim points at it. Cascades away with the employee.
 - `performance_reviews` (+ `performance_review_kpis`,
   `performance_review_expectations`) — one per employee and reviewed month
   (`period`, first day), due the 10th of the next month (generated).
@@ -490,8 +526,9 @@ Full detail in `supabase/schema.sql`.
 - Document upload: storage upload → `employee_documents` insert (trigger stamps
   `uploaded_by`). Delete in the app = set `deleted_at` (trigger stamps
   `deleted_by`).
-- Employee delete (company admin): delete row → cascades to documents and org
-  chart node → remove storage files (only then allowed).
+- Employee delete (company admin): delete row → cascades to documents, org
+  chart node and reimbursements → remove their storage files (only then
+  allowed).
 - Leave: insert (`leaves_guard` validates) → `leave_decide` by HR and the
   manager, in either order → approved. Approvers are resolved from the org
   chart at decision time, not stored at application.
@@ -519,6 +556,10 @@ Full detail in `supabase/schema.sql`.
 - Monthly review: `review_start` (manager, from *My team*) → draft saved as
   the lines and review row are updated → `review_submit` → the employee reads
   it and `review_acknowledge`s. Nothing reopens a submitted review.
+- Reimbursement: receipts uploaded → insert (in review) → HR
+  `reimbursement_move` approve → finance processed → proof uploaded (if
+  any) → `reimbursement_disburse`. Uploads are removed if the insert or
+  disbursal fails.
 - Payroll: `payroll_create` → lines edited / added / removed while draft
   (`payroll_items_guard`) → `payroll_move` to review, approved, processed,
   disbursed (only then do payslips show).

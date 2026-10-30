@@ -27,6 +27,7 @@ export const DOCS_BUCKET = 'employee-docs'
 export const APPLICATIONS_BUCKET = 'job-applications'
 export const BRANDING_BUCKET = 'branding'
 export const EQUIPMENT_BUCKET = 'equipment'
+export const REIMBURSEMENTS_BUCKET = 'reimbursements'
 
 // The leave fixtures are written for this year; leave tests freeze "today"
 // to it with `freezeToday(TODAY)` from setup.ts.
@@ -88,6 +89,7 @@ function employee(
     status,
     app_role,
     login_method: 'google',
+    can_claim_reimbursements: false,
     created_at: '2024-01-15T09:00:00Z',
     updated_at: '2024-01-15T09:00:00Z',
   }
@@ -464,6 +466,36 @@ const EQUIPMENT_ASSIGNMENTS: Row[] = [
     unassigned_on: null, unassigned_by: null, created_at: '2026-03-02T09:00:00Z' },
 ]
 
+function reimbursement(id: string, employee_id: string, description: string, expense_date: string, amount: number,
+  status: string, extra: Row = {}): Row {
+  return {
+    id, employee_id, description, expense_date, amount, receipt_paths: [`${employee_id}/${id}-1.jpg`], status,
+    created_at: `${expense_date}T10:00:00Z`, updated_at: `${expense_date}T10:00:00Z`, approved_by: null,
+    approved_at: null, processed_by: null, processed_at: null, disbursed_by: null, disbursed_at: null, rejected_by: null,
+    rejected_at: null, rejection_reason: null, withdrawn_at: null, transaction_date: null, transaction_reference: null,
+    transaction_proof_path: null, created_by: employee_id, ...extra,
+  }
+}
+
+// One claim at each step: Sara's are in review (two receipts), approved,
+// disbursed and rejected; Bilal's is processed. Nobody may claim by default
+// (can_claim_reimbursements), so other tests' navs are unchanged.
+const REIMBURSEMENTS: Row[] = [
+  reimbursement('rb-review', 'e-sara', 'Client lunch', '2026-06-05', 4500, 'review',
+    { receipt_paths: ['e-sara/rb-review-1.jpg', 'e-sara/rb-review-2.pdf'] }),
+  reimbursement('rb-approved', 'e-sara', 'Taxi to client', '2026-05-20', 1200, 'approved',
+    { approved_by: 'e-bilal', approved_at: '2026-05-21T09:00:00Z' }),
+  reimbursement('rb-processed', 'e-bilal', 'Team offsite snacks', '2026-05-10', 8000, 'processed',
+    { approved_by: 'e-amna', approved_at: '2026-05-11T09:00:00Z', processed_by: 'e-amna', processed_at: '2026-05-12T09:00:00Z' }),
+  reimbursement('rb-disbursed', 'e-sara', 'Conference ticket', '2026-04-02', 15000, 'disbursed', {
+    approved_by: 'e-bilal', approved_at: '2026-04-03T09:00:00Z', processed_by: 'e-amna', processed_at: '2026-04-05T09:00:00Z',
+    disbursed_by: 'e-amna', disbursed_at: '2026-04-20T09:00:00Z', transaction_date: '2026-04-20',
+    transaction_reference: 'IBFT-778812', transaction_proof_path: 'e-sara/proof-1.pdf',
+  }),
+  reimbursement('rb-rejected', 'e-sara', 'Gym membership', '2026-04-15', 6000, 'rejected',
+    { rejected_by: 'e-bilal', rejected_at: '2026-04-16T09:00:00Z', rejection_reason: 'Not a work expense' }),
+]
+
 // Sara's designation (Software Engineer) has two expectations besides its KPIs.
 const EXPECTATIONS: Row[] = [
   { id: 'x-tickets', designation_id: 'g-dev', title: 'Updates tickets daily' },
@@ -772,6 +804,15 @@ function insertDefaults(table: Table, row: Row): Row {
   // manager_notes_stamp: the author is whoever is signed in.
   if (table === 'manager_notes')
     return { body: '', updated_at: new Date().toISOString(), ...row, author_id: authState.bound?.id }
+  // A new claim is in review, with nothing decided yet; reimbursements_guard
+  // stamps who made it.
+  if (table === 'reimbursements')
+    return {
+      status: 'review', updated_at: new Date().toISOString(), approved_by: null, approved_at: null, processed_by: null,
+      processed_at: null, disbursed_by: null, disbursed_at: null, rejected_by: null, rejected_at: null,
+      rejection_reason: null, withdrawn_at: null, transaction_date: null, transaction_reference: null,
+      transaction_proof_path: null, ...row, created_by: authState.bound?.id,
+    }
   // equipment_guard stamps the creator; nobody has it yet.
   if (table === 'equipment')
     return { assigned_to: null, assigned_on: null, created_by: authState.bound?.id, updated_at: new Date().toISOString(), ...row }
@@ -888,6 +929,7 @@ export function reset() {
     manager_feedback_questions: copy(MANAGER_FEEDBACK_QUESTIONS),
     manager_feedback: copy(MANAGER_FEEDBACK),
     manager_feedback_answers: copy(MANAGER_FEEDBACK_ANSWERS),
+    reimbursements: copy(REIMBURSEMENTS),
   }
   for (const list of Object.values(captured)) list.length = 0
   failures.clear()
@@ -1314,6 +1356,29 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     for (const a of rowsIn('equipment_assignments'))
       if (a.equipment_id === id && !a.unassigned_on) Object.assign(a, { unassigned_on: on, unassigned_by: authState.bound?.id })
     Object.assign(item, { assigned_to: null, assigned_on: null })
+    return null
+  },
+
+  // Sets the status and stamps who moved it (a rejection keeps its reason).
+  reimbursement_move: ({ p_reimbursement_id: id, p_status: status, p_reason: reason }) => {
+    const r = find('reimbursements', id)
+    const now = new Date().toISOString()
+    const me = authState.bound?.id
+    if (!r) return null
+    if (status === 'approved') Object.assign(r, { status, approved_by: me, approved_at: now })
+    if (status === 'processed') Object.assign(r, { status, processed_by: me, processed_at: now })
+    if (status === 'rejected') Object.assign(r, { status, rejected_by: me, rejected_at: now, rejection_reason: reason })
+    if (status === 'withdrawn') Object.assign(r, { status, withdrawn_at: now })
+    return null
+  },
+
+  reimbursement_disburse: ({ p_reimbursement_id: id, p_transaction_date: date, p_reference: ref, p_proof_path: proof }) => {
+    const r = find('reimbursements', id)
+    if (r)
+      Object.assign(r, {
+        status: 'disbursed', disbursed_by: authState.bound?.id, disbursed_at: new Date().toISOString(),
+        transaction_date: date, transaction_reference: ref, transaction_proof_path: proof,
+      })
     return null
   },
 

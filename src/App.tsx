@@ -32,6 +32,8 @@ import GuidePage from './pages/home/GuidePage'
 import Profile from './pages/home/Profile'
 import Payrolls from './pages/finance/Payrolls'
 import PayrollDetail from './pages/finance/PayrollDetail'
+import Reimbursements from './pages/finance/Reimbursements'
+import MyReimbursements from './pages/finance/MyReimbursements'
 import EquipmentList from './pages/operations/Equipment'
 import EquipmentForm from './pages/operations/EquipmentForm'
 import Vendors from './pages/configuration/Vendors'
@@ -63,8 +65,17 @@ export default function App() {
 }
 
 function SignedIn() {
-  const { loading, employee, isHr, isCompanyAdmin, isManager, isHiringTeam, canManagePayroll, canManageOperations } =
-    useAuth()
+  const {
+    loading,
+    employee,
+    isHr,
+    isCompanyAdmin,
+    isManager,
+    isHiringTeam,
+    canManagePayroll,
+    canManageOperations,
+    canClaimReimbursements,
+  } = useAuth()
 
   if (loading) return spinner
   if (!employee) return <Login />
@@ -111,8 +122,10 @@ function SignedIn() {
           <>
             <Route path="/finance/payroll" element={<Payrolls />} />
             <Route path="/finance/payroll/:id" element={<PayrollDetail />} />
+            <Route path="/finance/reimbursements" element={<Reimbursements />} />
           </>
         )}
+        {canClaimReimbursements && <Route path="/reimbursements" element={<MyReimbursements />} />}
         {canManageOperations && (
           <>
             <Route path="/operations/equipment" element={<EquipmentList />} />

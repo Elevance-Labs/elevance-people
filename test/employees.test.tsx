@@ -135,9 +135,16 @@ await click(button('Delete', dialog()!))
 // (The list it goes back to then reads its own data.)
 // A file can only be removed once no document row points at it (storage policy).
 check('delete removes the record first, then its files',
-  captured.calls.slice(0, 3).join() === 'employee_documents.select,employees.delete,storage.remove', captured.calls.join())
-check('…every file, the hidden ones too',
-  JSON.stringify(captured.removals) === JSON.stringify([{ bucket: 'employee-docs', paths: ['e-sara/1111.pdf', 'e-sara/2222.png'] }]),
+  captured.calls.slice(0, 5).join() ===
+    'employee_documents.select,reimbursements.select,employees.delete,storage.remove,storage.remove', captured.calls.join())
+check('…every document file, the hidden ones too, and every reimbursement receipt and proof of payment',
+  JSON.stringify(captured.removals) === JSON.stringify([
+    { bucket: 'employee-docs', paths: ['e-sara/1111.pdf', 'e-sara/2222.png'] },
+    { bucket: 'reimbursements', paths: [
+      'e-sara/rb-review-1.jpg', 'e-sara/rb-review-2.pdf', 'e-sara/rb-approved-1.jpg', 'e-sara/rb-disbursed-1.jpg',
+      'e-sara/proof-1.pdf', 'e-sara/rb-rejected-1.jpg',
+    ] },
+  ]),
   JSON.stringify(captured.removals))
 check('…and goes back to the list', await waitFor(() => location.pathname === '/employees'), location.pathname)
 
