@@ -282,6 +282,8 @@ export interface Announcement {
 export interface OnboardingTemplateSection {
   id: string
   name: string
+  // Null = for everyone; else copied only for employees in this department.
+  department_id: string | null
   // Set by the database (new ones go last); changed only by the reorder RPCs.
   sort_order: number
 }
@@ -322,6 +324,10 @@ export interface OnboardingTask {
   sort_order: number
   done_by: string | null
   done_at: string | null
+  // The department of the section it came from (null = for everyone).
+  department_id: string | null
+  // The checklist task it came from; kept in line while in progress.
+  template_task_id: string | null
 }
 
 export type OffboardingStatus = 'in_progress' | 'completed' | 'cancelled'
@@ -357,6 +363,10 @@ export interface OffboardingTask {
   sort_order: number
   done_by: string | null
   done_at: string | null
+  // The department of the section it came from (null = for everyone).
+  department_id: string | null
+  // The checklist task it came from; kept in line while in progress.
+  template_task_id: string | null
 }
 
 export type SalaryRevisionStatus = 'draft' | 'review' | 'approved'

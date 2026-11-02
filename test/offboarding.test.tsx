@@ -5,7 +5,7 @@
 // employees_offboarding trigger, the offboarding RPCs, RLS and grants); these
 // checks prove the app offers only what that allows and sends exactly what it
 // should.
-import { setupDom, reporter, text, button, click, type, choose, dialog, row, waitFor, freezeToday, field } from './setup'
+import { setupDom, reporter, text, button, click, type, choose, dialog, row, waitFor, freezeToday, field, press } from './setup'
 setupDom()
 freezeToday('2026-06-10')
 
@@ -115,8 +115,12 @@ function saraManagesOmar() {
   const own = table('offboardings')
   own.splice(0, own.length, { ...own.find((o) => o.id === 'off-omar')!, id: 'off-omar-2', status: 'in_progress',
     hr_signed_by: null, hr_signed_at: null, completed_at: null, last_working_day: '2026-06-09' })
+  // One task for Engineering (Sara's department), one for everyone, done.
   table('offboarding_tasks').push({ id: 'ft-omar-2', offboarding_id: 'off-omar-2', section: 'Handover', section_order: 0,
-    title: 'Hand over open work', sort_order: 0, done_by: null, done_at: null })
+    title: 'Hand over open work', sort_order: 0, done_by: null, done_at: null, department_id: 'd-eng',
+    template_task_id: null }, { id: 'ft-omar-3', offboarding_id: 'off-omar-2', section: 'Exit', section_order: 1,
+    title: 'Exit interview', sort_order: 0, done_by: 'e-bilal', done_at: '2026-06-01T09:00:00Z', department_id: null,
+    template_task_id: null })
   signInAs(PEOPLE.member)
 }
 
@@ -128,6 +132,9 @@ await mountApp('/hr/offboarding/off-omar-2')
 check('a manager can open their report\'s offboarding', location.pathname === '/hr/offboarding/off-omar-2')
 check('…but not change the details or cancel it', !button('Set details') && !button('Change') && !button('Cancel offboarding'))
 check('…nor see a link to the employee record', !document.querySelector('a[href*="/employees/"]'))
+check('…and is told they tick their department’s tasks', text().includes('You can tick the tasks for your department.'))
+check('only their department’s tasks can be ticked',
+  tick('Hand over open work')?.disabled === false && tick('Exit interview')?.disabled === true)
 await click(tick('Hand over open work'))
 check('a manager can tick tasks', rpcArgs('offboarding_task_set').at(-1) ===
   JSON.stringify({ p_task_id: 'ft-omar-2', p_done: true }))
@@ -166,7 +173,7 @@ signInAs(PEOPLE.companyAdmin)
 await mountApp('/configuration/offboarding')
 check('a company admin sees the offboarding checklist', text().includes('Offboarding checklist') &&
   sectionNames().join() === 'Handover,Equipment', sectionNames().join())
-await click(button('Move Handover down'))
+await press('ArrowDown', button('Reorder Handover'))
 check('moving a section calls the offboarding reorder',
   rpcArgs('offboarding_reorder_sections').at(-1) === JSON.stringify({ p_ids: ['fs-kit', 'fs-handover'] }) &&
     !rpcArgs('onboarding_reorder_sections').length)
@@ -175,10 +182,11 @@ await type('Name', ' Exit ')
 await click(button('Add', dialog()!))
 check('adding a section writes to the offboarding checklist',
   JSON.stringify(captured.inserts.find((i) => i.table === 'offboarding_template_sections')?.rows) ===
-    JSON.stringify([{ name: 'Exit' }]) && !captured.inserts.some((i) => i.table === 'onboarding_template_sections'))
+    JSON.stringify([{ name: 'Exit', department_id: null }]) && !captured.inserts.some((i) => i.table === 'onboarding_template_sections'))
 check('…and it goes last', await waitFor(() => sectionNames().join() === 'Equipment,Handover,Exit'), sectionNames().join())
 
 await mountApp('/configuration/onboarding')
-check('the onboarding checklist is still its own', sectionNames().join() === 'Paperwork,IT setup', sectionNames().join())
+check('the onboarding checklist is still its own', sectionNames().join() === 'Paperwork,IT setup,Dev tools,HR systems',
+  sectionNames().join())
 
 done()

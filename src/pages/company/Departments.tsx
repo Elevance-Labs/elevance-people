@@ -237,9 +237,9 @@ export default function Departments() {
         open={!!deleting}
         title="Delete department?"
         message={
-          deleting && countOf(deleting.designations)
+          (deleting && countOf(deleting.designations)
             ? `${deleting.name} and its ${countOf(deleting.designations)} designation(s), including their KPIs, will be deleted.`
-            : `${deleting?.name} will be deleted.`
+            : `${deleting?.name} will be deleted.`) + ' So will any onboarding or offboarding checklist sections for it.'
         }
         confirmLabel="Delete"
         destructive

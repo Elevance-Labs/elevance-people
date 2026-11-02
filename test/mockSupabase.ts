@@ -254,10 +254,13 @@ const ANNOUNCEMENTS: Row[] = [
   },
 ]
 
-// The onboarding checklist: Paperwork first, then IT setup.
+// The onboarding checklist: Paperwork first, then IT setup, for everyone; then
+// a section each for Engineering and People Ops only.
 const ONBOARDING_TEMPLATE_SECTIONS: Row[] = [
-  { id: 'os-paper', name: 'Paperwork', sort_order: 0 },
-  { id: 'os-it', name: 'IT setup', sort_order: 1 },
+  { id: 'os-paper', name: 'Paperwork', department_id: null, sort_order: 0 },
+  { id: 'os-it', name: 'IT setup', department_id: null, sort_order: 1 },
+  { id: 'os-eng', name: 'Dev tools', department_id: 'd-eng', sort_order: 2 },
+  { id: 'os-ops', name: 'HR systems', department_id: 'd-ops', sort_order: 3 },
 ]
 
 const ONBOARDING_TEMPLATE_TASKS: Row[] = [
@@ -266,6 +269,8 @@ const ONBOARDING_TEMPLATE_TASKS: Row[] = [
   { id: 'ot-laptop', section_id: 'os-it', title: 'Issue a laptop', sort_order: 0 },
   { id: 'ot-email', section_id: 'os-it', title: 'Create email account', sort_order: 1 },
   { id: 'ot-slack', section_id: 'os-it', title: 'Add to Slack', sort_order: 2 },
+  { id: 'ot-github', section_id: 'os-eng', title: 'Add to GitHub', sort_order: 0 },
+  { id: 'ot-hris', section_id: 'os-ops', title: 'Give HRIS access', sort_order: 0 },
 ]
 
 function onboarding(id: string, employee_id: string, due_date: string, status: string, extra: Row = {}): Row {
@@ -284,9 +289,9 @@ const ONBOARDINGS: Row[] = [
 ]
 
 function onboardingTask(id: string, onboarding_id: string, section: string, section_order: number, title: string,
-  sort_order: number, done = false): Row {
+  sort_order: number, done = false, department_id: string | null = null): Row {
   return {
-    id, onboarding_id, section, section_order, title, sort_order,
+    id, onboarding_id, section, section_order, title, sort_order, department_id, template_task_id: null,
     done_by: done ? 'e-bilal' : null, done_at: done ? '2026-06-01T09:00:00Z' : null,
   }
 }
@@ -300,8 +305,8 @@ const ONBOARDING_TASKS: Row[] = [
 
 // The offboarding checklist: Handover, then Equipment.
 const OFFBOARDING_TEMPLATE_SECTIONS: Row[] = [
-  { id: 'fs-handover', name: 'Handover', sort_order: 0 },
-  { id: 'fs-kit', name: 'Equipment', sort_order: 1 },
+  { id: 'fs-handover', name: 'Handover', department_id: null, sort_order: 0 },
+  { id: 'fs-kit', name: 'Equipment', department_id: null, sort_order: 1 },
 ]
 
 const OFFBOARDING_TEMPLATE_TASKS: Row[] = [
@@ -332,7 +337,7 @@ const OFFBOARDINGS: Row[] = [
 function offboardingTask(id: string, offboarding_id: string, section: string, section_order: number, title: string,
   sort_order: number, done = false): Row {
   return {
-    id, offboarding_id, section, section_order, title, sort_order,
+    id, offboarding_id, section, section_order, title, sort_order, department_id: null, template_task_id: null,
     done_by: done ? 'e-amna' : null, done_at: done ? '2026-06-01T09:00:00Z' : null,
   }
 }
@@ -1190,10 +1195,15 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     rowsIn('onboardings').push(onboarding(onboardingId, employeeId,
       `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`,
       'in_progress', { application_id: id, created_by: authState.bound?.id, created_at: new Date().toISOString() }))
-    for (const s of rowsIn('onboarding_template_sections')) {
+    // Sections for everyone, and those for the job's department.
+    for (const s of rowsIn('onboarding_template_sections')
+      .filter((x) => x.department_id === null || x.department_id === job?.department_id)) {
       for (const t of rowsIn('onboarding_template_tasks').filter((x) => x.section_id === s.id)) {
-        rowsIn('onboarding_tasks').push(onboardingTask(`new-${nextId++}`, onboardingId, String(s.name),
-          Number(s.sort_order), String(t.title), Number(t.sort_order)))
+        rowsIn('onboarding_tasks').push({
+          ...onboardingTask(`new-${nextId++}`, onboardingId, String(s.name), Number(s.sort_order), String(t.title),
+            Number(t.sort_order), false, (s.department_id ?? null) as string | null),
+          template_task_id: t.id,
+        })
       }
     }
     RPCS.application_move({ p_application_id: id, p_stage: 'hired', p_reason: reason })

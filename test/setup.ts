@@ -160,6 +160,13 @@ export async function click(el: Element | null | undefined) {
   await settle()
 }
 
+/** A key pressed on `el`, e.g. an arrow key on a drag handle. */
+export async function press(key: string, el: Element | null | undefined) {
+  if (!el) throw new Error(`press ${key}: element not found`)
+  el.dispatchEvent(new (win().KeyboardEvent)('keydown', { key, bubbles: true, cancelable: true }))
+  await settle()
+}
+
 /** The form control wrapping the field with this label (required `*` ignored). */
 export function field(label: string, root: ParentNode = doc()) {
   // Select labels are not <label> elements in MUI 9, so match on the class.
@@ -196,8 +203,8 @@ export async function choose(label: string, option: string, root: ParentNode = d
 export const options = () => [...doc().querySelectorAll('[role="option"]')]
 
 /** The current value shown by an MUI select or text field. */
-export function valueOf(label: string) {
-  const f = field(label)
+export function valueOf(label: string, root: ParentNode = doc()) {
+  const f = field(label, root)
   return f?.querySelector('input:not([aria-hidden])')?.getAttribute('value') ??
     (f?.querySelector('input') as HTMLInputElement | null)?.value ?? null
 }

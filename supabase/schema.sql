@@ -456,9 +456,13 @@ create table public.onboarding_template_sections (
   -- Set on insert (last), changed only by onboarding_reorder_sections.
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- Null = for everyone; else copied only for employees in this department.
+  department_id uuid references public.departments (id) on delete cascade
 );
-create unique index onboarding_template_sections_name_key on public.onboarding_template_sections (lower(name));
+-- Names are unique within a department, or among the sections for everyone.
+create unique index onboarding_template_sections_name_key
+  on public.onboarding_template_sections (department_id, lower(name)) nulls not distinct;
 
 create table public.onboarding_template_tasks (
   id         uuid primary key default gen_random_uuid(),
@@ -506,10 +510,16 @@ create table public.onboarding_tasks (
   title         text not null,
   sort_order    integer not null,
   done_by       uuid references public.employees (id) on delete set null,
-  done_at       timestamptz
+  done_at       timestamptz,
+  -- The department of the section it came from (null = for everyone): the
+  -- employee's manager may tick it if it's their own department.
+  department_id uuid references public.departments (id) on delete set null,
+  -- The checklist task it came from; kept in line while in progress.
+  template_task_id uuid references public.onboarding_template_tasks (id) on delete set null
 );
 create index onboarding_tasks_onboarding_idx
   on public.onboarding_tasks (onboarding_id, section_order, sort_order);
+create index onboarding_tasks_template_idx on public.onboarding_tasks (template_task_id);
 
 -- ---------------------------------------------------------------------------
 -- Offboarding: the checklist company admins keep (like onboarding's), and an
@@ -523,9 +533,13 @@ create table public.offboarding_template_sections (
   -- Set on insert (last), changed only by offboarding_reorder_sections.
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- Null = for everyone; else copied only for employees in this department.
+  department_id uuid references public.departments (id) on delete cascade
 );
-create unique index offboarding_template_sections_name_key on public.offboarding_template_sections (lower(name));
+-- Names are unique within a department, or among the sections for everyone.
+create unique index offboarding_template_sections_name_key
+  on public.offboarding_template_sections (department_id, lower(name)) nulls not distinct;
 
 create table public.offboarding_template_tasks (
   id         uuid primary key default gen_random_uuid(),
@@ -577,10 +591,16 @@ create table public.offboarding_tasks (
   title          text not null,
   sort_order     integer not null,
   done_by        uuid references public.employees (id) on delete set null,
-  done_at        timestamptz
+  done_at        timestamptz,
+  -- The department of the section it came from (null = for everyone): the
+  -- employee's manager may tick it if it's their own department.
+  department_id  uuid references public.departments (id) on delete set null,
+  -- The checklist task it came from; kept in line while in progress.
+  template_task_id uuid references public.offboarding_template_tasks (id) on delete set null
 );
 create index offboarding_tasks_offboarding_idx
   on public.offboarding_tasks (offboarding_id, section_order, sort_order);
+create index offboarding_tasks_template_idx on public.offboarding_tasks (template_task_id);
 
 
 -- ---------------------------------------------------------------------------
@@ -2081,11 +2101,8 @@ begin
   insert into public.onboardings (employee_id, application_id, due_date, created_by)
   values (v_employee, v_app.id, p_date_of_joining + 1, v_me)
   returning id into v_onboarding;
-
-  insert into public.onboarding_tasks (onboarding_id, section, section_order, title, sort_order)
-  select v_onboarding, s.name, s.sort_order, t.title, t.sort_order
-    from public.onboarding_template_sections s
-    join public.onboarding_template_tasks t on t.section_id = s.id;
+  -- The checklist: sections for everyone, and those for the job's department.
+  perform public.onboarding_sync(v_onboarding);
 
   update public.job_applications set stage = 'hired', stage_changed_at = now()
    where id = p_application_id;
@@ -2137,20 +2154,40 @@ begin
 end;
 $$;
 
--- Tick a task off, or untick it, while the onboarding is in progress.
+-- HR, or the employee's manager in the org chart.
+create function public.can_see_onboarding(p_employee_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select public.is_hr() or public.is_manager_of(p_employee_id);
+$$;
+
+-- HR ticks any checklist task; anyone else (the manager) only those from
+-- their own department's sections.
+create function public.can_tick_checklist_task(p_department_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select public.is_hr()
+      or p_department_id = (select e.department_id from public.employees e
+                             where e.id = public.current_employee_id());
+$$;
+
+
+-- Tick a task off, or untick it, while the onboarding is in progress: HR any
+-- task, the employee's manager those from their own department's sections.
 create function public.onboarding_task_set(p_task_id uuid, p_done boolean)
 returns void language plpgsql security definer set search_path = '' as $$
 declare
-  v_status public.onboarding_status;
+  v_status     public.onboarding_status;
+  v_employee   uuid;
+  v_department uuid;
 begin
-  if not public.is_hr() then
-    raise exception 'Only HR can update an onboarding.' using errcode = '42501';
-  end if;
-  select o.status into v_status
+  select o.status, o.employee_id, t.department_id into v_status, v_employee, v_department
     from public.onboarding_tasks t join public.onboardings o on o.id = t.onboarding_id
    where t.id = p_task_id for update of o;
-  if not found then
+  if not found or not public.can_see_onboarding(v_employee) then
     raise exception 'Task not found.' using errcode = 'P0002';
+  end if;
+  if not public.can_tick_checklist_task(v_department) then
+    raise exception 'Only HR can tick this task. Managers tick the tasks for their own department.'
+      using errcode = '42501';
   end if;
   if v_status <> 'in_progress' then
     raise exception 'This onboarding is already %.', v_status;
@@ -2235,11 +2272,8 @@ begin
     insert into public.offboardings (employee_id, last_working_day, started_by)
     values (new.id, new.date_of_separation, public.current_employee_id())
     returning id into v_offboarding;
-
-    insert into public.offboarding_tasks (offboarding_id, section, section_order, title, sort_order)
-    select v_offboarding, s.name, s.sort_order, t.title, t.sort_order
-      from public.offboarding_template_sections s
-      join public.offboarding_template_tasks t on t.section_id = s.id;
+    -- The checklist: sections for everyone, and those for their department.
+    perform public.offboarding_sync(v_offboarding);
   elsif tg_op = 'UPDATE' and old.status = 'notice_period' and public.is_login_status(new.status) then
     update public.offboardings
        set status = 'cancelled', cancelled_by = public.current_employee_id(), cancelled_at = now(),
@@ -2318,18 +2352,24 @@ begin
 end;
 $$;
 
--- Tick a task off, or untick it, while the offboarding is in progress.
--- Unticking clears the sign-offs given.
+-- Tick a task off, or untick it (which clears the sign-offs): HR any task,
+-- the manager those from their own department's sections.
 create function public.offboarding_task_set(p_task_id uuid, p_done boolean)
 returns void language plpgsql security definer set search_path = '' as $$
 declare
   v_offboarding public.offboardings;
+  v_department  uuid;
 begin
   select o.* into v_offboarding
     from public.offboarding_tasks t join public.offboardings o on o.id = t.offboarding_id
    where t.id = p_task_id for update of o;
   if not found or not public.can_work_offboarding(v_offboarding.employee_id) then
     raise exception 'Task not found.' using errcode = 'P0002';
+  end if;
+  select t.department_id into v_department from public.offboarding_tasks t where t.id = p_task_id;
+  if not public.can_tick_checklist_task(v_department) then
+    raise exception 'Only HR can tick this task. Managers tick the tasks for their own department.'
+      using errcode = '42501';
   end if;
   if v_offboarding.status <> 'in_progress' then
     raise exception 'This offboarding is already %.', v_offboarding.status;
@@ -2345,6 +2385,133 @@ begin
   end if;
 end;
 $$;
+
+-- Brings an onboarding in progress in line with the checklist for the
+-- employee's department. Does nothing to a closed one.
+create function public.onboarding_sync(p_onboarding_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_department uuid;
+begin
+  select e.department_id into v_department
+    from public.onboardings o join public.employees e on e.id = o.employee_id
+   where o.id = p_onboarding_id and o.status = 'in_progress';
+  if not found then
+    return;
+  end if;
+  delete from public.onboarding_tasks k
+   where k.onboarding_id = p_onboarding_id
+     and not exists (select 1 from public.onboarding_template_tasks t
+                       join public.onboarding_template_sections s on s.id = t.section_id
+                      where t.id = k.template_task_id
+                        and (s.department_id is null or s.department_id = v_department));
+  update public.onboarding_tasks k
+     set section = s.name, section_order = s.sort_order, title = t.title, sort_order = t.sort_order,
+         department_id = s.department_id
+    from public.onboarding_template_tasks t
+    join public.onboarding_template_sections s on s.id = t.section_id
+   where k.onboarding_id = p_onboarding_id and k.template_task_id = t.id
+     and (k.section, k.section_order, k.title, k.sort_order, k.department_id)
+         is distinct from (s.name, s.sort_order, t.title, t.sort_order, s.department_id);
+  insert into public.onboarding_tasks
+    (onboarding_id, template_task_id, section, section_order, title, sort_order, department_id)
+  select p_onboarding_id, t.id, s.name, s.sort_order, t.title, t.sort_order, s.department_id
+    from public.onboarding_template_tasks t
+    join public.onboarding_template_sections s on s.id = t.section_id
+   where (s.department_id is null or s.department_id = v_department)
+     and not exists (select 1 from public.onboarding_tasks k
+                      where k.onboarding_id = p_onboarding_id and k.template_task_id = t.id);
+end;
+$$;
+
+-- The same for an offboarding; a task added clears the sign-offs given.
+create function public.offboarding_sync(p_offboarding_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_department uuid;
+begin
+  select e.department_id into v_department
+    from public.offboardings o join public.employees e on e.id = o.employee_id
+   where o.id = p_offboarding_id and o.status = 'in_progress';
+  if not found then
+    return;
+  end if;
+  delete from public.offboarding_tasks k
+   where k.offboarding_id = p_offboarding_id
+     and not exists (select 1 from public.offboarding_template_tasks t
+                       join public.offboarding_template_sections s on s.id = t.section_id
+                      where t.id = k.template_task_id
+                        and (s.department_id is null or s.department_id = v_department));
+  update public.offboarding_tasks k
+     set section = s.name, section_order = s.sort_order, title = t.title, sort_order = t.sort_order,
+         department_id = s.department_id
+    from public.offboarding_template_tasks t
+    join public.offboarding_template_sections s on s.id = t.section_id
+   where k.offboarding_id = p_offboarding_id and k.template_task_id = t.id
+     and (k.section, k.section_order, k.title, k.sort_order, k.department_id)
+         is distinct from (s.name, s.sort_order, t.title, t.sort_order, s.department_id);
+  insert into public.offboarding_tasks
+    (offboarding_id, template_task_id, section, section_order, title, sort_order, department_id)
+  select p_offboarding_id, t.id, s.name, s.sort_order, t.title, t.sort_order, s.department_id
+    from public.offboarding_template_tasks t
+    join public.offboarding_template_sections s on s.id = t.section_id
+   where (s.department_id is null or s.department_id = v_department)
+     and not exists (select 1 from public.offboarding_tasks k
+                      where k.offboarding_id = p_offboarding_id and k.template_task_id = t.id);
+  if found then
+    update public.offboardings
+       set hr_signed_by = null, hr_signed_at = null, manager_signed_by = null, manager_signed_at = null
+     where id = p_offboarding_id;
+  end if;
+end;
+$$;
+
+-- Any change to a checklist reaches every one of its kind in progress.
+create function public.onboarding_checklist_changed()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.onboarding_sync(o.id) from public.onboardings o where o.status = 'in_progress';
+  return null;
+end;
+$$;
+
+create function public.offboarding_checklist_changed()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.offboarding_sync(o.id) from public.offboardings o where o.status = 'in_progress';
+  return null;
+end;
+$$;
+
+create trigger onboarding_checklist_changed
+  after insert or update or delete on public.onboarding_template_sections
+  for each statement execute function public.onboarding_checklist_changed();
+create trigger onboarding_checklist_changed
+  after insert or update or delete on public.onboarding_template_tasks
+  for each statement execute function public.onboarding_checklist_changed();
+create trigger offboarding_checklist_changed
+  after insert or update or delete on public.offboarding_template_sections
+  for each statement execute function public.offboarding_checklist_changed();
+create trigger offboarding_checklist_changed
+  after insert or update or delete on public.offboarding_template_tasks
+  for each statement execute function public.offboarding_checklist_changed();
+
+-- An employee moved to another department gets that department's sections.
+create function public.employees_checklists()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.onboarding_sync(o.id) from public.onboardings o
+    where o.employee_id = new.id and o.status = 'in_progress';
+  perform public.offboarding_sync(o.id) from public.offboardings o
+    where o.employee_id = new.id and o.status = 'in_progress';
+  return null;
+end;
+$$;
+
+create trigger employees_checklists
+  after update of department_id on public.employees
+  for each row when (old.department_id is distinct from new.department_id)
+  execute function public.employees_checklists();
 
 -- HR and the manager sign off, as whichever they are (both, for a manager
 -- who is HR). The manager is resolved now, from the org chart; with none, HR
@@ -3655,14 +3822,16 @@ grant insert (body, pinned_until), update (body, pinned_until)
 -- sort_order is set by the trigger and the reorder functions only.
 grant select, delete on public.onboarding_template_sections, public.onboarding_template_tasks
   to authenticated;
-grant insert (name), update (name) on public.onboarding_template_sections to authenticated;
+grant insert (name, department_id), update (name, department_id)
+  on public.onboarding_template_sections to authenticated;
 grant insert (section_id, title), update (title) on public.onboarding_template_tasks to authenticated;
 -- Onboardings change only through application_hire and the onboarding functions.
 grant select on public.onboardings, public.onboarding_tasks to authenticated;
 
 grant select, delete on public.offboarding_template_sections, public.offboarding_template_tasks
   to authenticated;
-grant insert (name), update (name) on public.offboarding_template_sections to authenticated;
+grant insert (name, department_id), update (name, department_id)
+  on public.offboarding_template_sections to authenticated;
 grant insert (section_id, title), update (title) on public.offboarding_template_tasks to authenticated;
 -- Offboardings change only through employees_offboarding and the offboarding functions.
 grant select on public.offboardings, public.offboarding_tasks to authenticated;
@@ -3755,8 +3924,11 @@ revoke execute on function
   public.application_undo(uuid, text), public.application_count(public.job_openings),
   public.onboarding_template_sections_stamp(), public.onboarding_template_tasks_stamp(),
   public.onboarding_reorder_sections(uuid[]), public.onboarding_reorder_tasks(uuid, uuid[]),
-  public.application_hire(uuid, text, date, text), public.onboarding_task_set(uuid, boolean),
+  public.application_hire(uuid, text, date, text), public.can_see_onboarding(uuid),
+  public.onboarding_task_set(uuid, boolean),
   public.onboarding_complete(uuid), public.onboarding_cancel(uuid, text),
+  public.can_tick_checklist_task(uuid), public.onboarding_sync(uuid), public.offboarding_sync(uuid),
+  public.onboarding_checklist_changed(), public.offboarding_checklist_changed(), public.employees_checklists(),
   public.offboarding_template_sections_stamp(), public.offboarding_template_tasks_stamp(),
   public.can_work_offboarding(uuid), public.employees_offboarding(),
   public.offboarding_reorder_sections(uuid[]), public.offboarding_reorder_tasks(uuid, uuid[]),
@@ -3802,7 +3974,8 @@ grant execute on function
   public.application_move(uuid, public.application_stage, text),
   public.application_undo(uuid, text), public.application_count(public.job_openings),
   public.onboarding_reorder_sections(uuid[]), public.onboarding_reorder_tasks(uuid, uuid[]),
-  public.application_hire(uuid, text, date, text), public.onboarding_task_set(uuid, boolean),
+  public.application_hire(uuid, text, date, text), public.can_see_onboarding(uuid),
+  public.onboarding_task_set(uuid, boolean),
   public.onboarding_complete(uuid), public.onboarding_cancel(uuid, text),
   public.can_work_offboarding(uuid),
   public.offboarding_reorder_sections(uuid[]), public.offboarding_reorder_tasks(uuid, uuid[]),
@@ -4069,11 +4242,13 @@ create policy onboarding_template_tasks_update on public.onboarding_template_tas
 create policy onboarding_template_tasks_delete on public.onboarding_template_tasks
   for delete to authenticated using ((select public.is_company_admin()));
 
--- Onboardings and their tasks: HR only.
+-- Onboardings and their tasks: HR, and the employee's manager.
 create policy onboardings_select on public.onboardings
-  for select to authenticated using ((select public.is_hr()));
+  for select to authenticated using (public.can_see_onboarding(employee_id));
 create policy onboarding_tasks_select on public.onboarding_tasks
-  for select to authenticated using ((select public.is_hr()));
+  for select to authenticated
+  using (exists (select 1 from public.onboardings o
+                  where o.id = onboarding_id and public.can_see_onboarding(o.employee_id)));
 
 -- The offboarding checklist: HR reads it, company admins change it.
 create policy offboarding_template_sections_select on public.offboarding_template_sections

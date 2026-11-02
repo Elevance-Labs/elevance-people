@@ -173,8 +173,9 @@ await mountApp('/leaves/requests')
 check('having a direct report is checked at sign-in',
   captured.reads.includes('org_chart_nodes'), captured.reads.join())
 check('a member with a direct report reaches leave requests', location.pathname === '/leaves/requests', location.pathname)
-check('…and is offered it and their reports\' offboarding, but not HR\'s leave set-up',
-  navLabels().join() === 'Dashboard,Handbook,Resources,Profile,My leaves,Org chart,Performance,Leave requests,Offboarding',
+check('…and is offered it and their reports\' onboarding and offboarding, but not HR\'s leave set-up',
+  navLabels().join() ===
+    'Dashboard,Handbook,Resources,Profile,My leaves,Org chart,Performance,Leave requests,Onboarding,Offboarding',
   navLabels().join())
 
 // ---------------- a member on a job's hiring team ----------------

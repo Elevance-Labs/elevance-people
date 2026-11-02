@@ -29,7 +29,7 @@ import {
   formatDate,
   formatDayTime,
 } from '../../lib/constants'
-import { bySection, progressOf } from '../../lib/onboarding'
+import { bySection, canTickChecklistTask, progressOf } from '../../lib/onboarding'
 import { offboardingError, signOffOf, type SignOffStep } from '../../lib/offboarding'
 import type { DirectoryEntry, Offboarding, OffboardingReason, OffboardingTask } from '../../lib/types'
 
@@ -217,6 +217,12 @@ export default function OffboardingDetail() {
         </Alert>
       )}
 
+      {!isHr && inProgress && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          You can tick the tasks for your department. HR does the rest.
+        </Alert>
+      )}
+
       <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, mb: 3 }}>
         <Paper variant="outlined" component="section" aria-label="Details" sx={{ p: 2 }}>
           <Stack direction="row" sx={{ alignItems: 'center', mb: 1 }}>
@@ -306,7 +312,10 @@ export default function OffboardingDetail() {
                 <Box key={t.id}>
                   <FormControlLabel
                     label={t.title}
-                    disabled={!inProgress || pending !== null}
+                    disabled={
+                      !inProgress || pending !== null ||
+                      !canTickChecklistTask(t, { isHr, departmentId: employee?.department_id ?? null })
+                    }
                     control={<Checkbox checked={!!t.done_at} onChange={() => toggle(t)} />}
                     sx={{ '& .MuiFormControlLabel-label': { textDecoration: t.done_at ? 'line-through' : undefined } }}
                   />

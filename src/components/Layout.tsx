@@ -122,8 +122,9 @@ const NAV: NavSection[] = [
   {
     title: 'Human Resources',
     items: [
-      { to: '/hr/onboarding', label: 'Onboarding', icon: <HowToRegOutlinedIcon />, hrOnly: true },
-      // Managers sign off their direct reports' offboardings.
+      // Managers tick their department's tasks on their direct reports' onboardings,
+      // and sign off their offboardings.
+      { to: '/hr/onboarding', label: 'Onboarding', icon: <HowToRegOutlinedIcon />, approversOnly: true },
       { to: '/hr/offboarding', label: 'Offboarding', icon: <PersonRemoveOutlinedIcon />, approversOnly: true },
     ],
   },

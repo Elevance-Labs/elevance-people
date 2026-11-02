@@ -20,31 +20,36 @@ import { PageHeader, PersonAvatar } from '../../components/common'
 import { supabase } from '../../lib/supabase'
 import { ONBOARDING_STATUS_COLORS, ONBOARDING_STATUS_LABELS, formatDate } from '../../lib/constants'
 import { ONBOARDING_LIST, isOverdue, progressOf, type OnboardingListRow } from '../../lib/onboarding'
-import type { OnboardingStatus } from '../../lib/types'
+import type { DirectoryEntry, OnboardingStatus } from '../../lib/types'
 
 const TABS: OnboardingStatus[] = ['in_progress', 'completed', 'cancelled']
 
-// Human Resources → Onboarding (HR): every new hire's onboarding, one tab per
-// status (?status=…, in progress by default). Onboardings are started by
-// hiring an applicant; a row opens its checklist.
+// Human Resources → Onboarding (HR, and managers for their direct reports):
+// onboardings, one tab per status (?status=…, in progress by default).
+// Onboardings are started by hiring an applicant; a row opens its checklist.
+// Managers can't read employees, so names also come from the directory.
 export default function Onboarding() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const status = TABS.find((s) => s === params.get('status')) ?? 'in_progress'
   const [rows, setRows] = useState<OnboardingListRow[]>([])
+  const [people, setPeople] = useState<DirectoryEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    supabase
-      .from('onboardings')
-      .select(ONBOARDING_LIST)
-      .order('due_date')
-      .then(({ data, error: loadError }) => {
-        if (loadError) setError(loadError.message)
-        else setRows(data as unknown as OnboardingListRow[])
-        setLoading(false)
-      })
+    Promise.all([
+      supabase.from('onboardings').select(ONBOARDING_LIST).order('due_date'),
+      supabase.from('employee_directory').select('*'),
+    ]).then(([onboardingsRes, directoryRes]) => {
+      const loadError = onboardingsRes.error ?? directoryRes.error
+      if (loadError) setError(loadError.message)
+      else {
+        setRows(onboardingsRes.data as unknown as OnboardingListRow[])
+        setPeople(directoryRes.data as DirectoryEntry[])
+      }
+      setLoading(false)
+    })
   }, [])
 
   const counts = useMemo(
@@ -94,7 +99,8 @@ export default function Onboarding() {
             <TableBody>
               {shown.map((r) => {
                 const progress = progressOf(r.tasks)
-                const name = r.employee?.full_name ?? 'Unknown'
+                const person = people.find((p) => p.id === r.employee_id)
+                const name = r.employee?.full_name ?? person?.full_name ?? 'Unknown'
                 return (
                   <TableRow
                     key={r.id}
@@ -110,7 +116,7 @@ export default function Onboarding() {
                             {name}
                           </Typography>
                           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            {r.employee?.company_email}
+                            {r.employee?.company_email ?? person?.company_email}
                           </Typography>
                         </Box>
                       </Box>

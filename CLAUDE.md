@@ -57,7 +57,9 @@ behaviour).
   salary and notes by `application_set_hr_details`); their stage
   moves only through `application_move` / `application_undo`, and to hired
   only through `application_hire`. Onboardings change only through
-  `onboarding_task_set` / `_complete` / `_cancel`; checklist order only
+  `onboarding_task_set` / `_complete` / `_cancel`, and the checklist sync
+  (`onboarding_sync` / `offboarding_sync`, run by triggers on checklist and
+  department changes, in progress only); checklist order only
   through `onboarding_reorder_sections` / `_tasks`. Offboardings are started
   and auto-cancelled only by the `employees_offboarding` trigger (status to /
   from notice period) and change only through `offboarding_set_details` /
@@ -110,7 +112,7 @@ behaviour).
 | `src/pages/company/` | Company settings pages (company admins; the Leaves, Holidays and Announcements pages also HR). |
 | `src/pages/leaves/` | Leaves pages: own leaves, requests to approve. |
 | `src/pages/hiring/` | Job openings list and form (HR); applications board and its dialog. |
-| `src/pages/hr/` | Human Resources pages: onboarding list and detail (HR); offboarding list and detail (HR, and managers). |
+| `src/pages/hr/` | Human Resources pages: onboarding and offboarding lists and details (HR, and managers). |
 | `src/pages/finance/` | Finance pages: payroll list and one payroll, reimbursements (HR, finance admins, company admins); my reimbursements (whoever HR allows to claim). |
 | `src/pages/operations/` | Operations pages (HR, finance admins, company admins): equipment list and one item. |
 | `src/pages/performance/` | Performance: the tabbed page (Me, My team, People), one review, one person's history. |
@@ -185,9 +187,10 @@ behaviour).
   rich text editor) is lazy-loaded.
 - `/applications` — HR and hiring teams: one job's board (`?job=` required,
   defaults to the first), open application in `?application=`.
-- `/hr/onboarding` — HR: onboardings by status (`?status=`, in progress by
-  default). `/hr/onboarding/:id` — one onboarding's checklist; tick, complete
-  or cancel. `/hr/offboarding` — HR and managers (RLS: never their own):
+- `/hr/onboarding` — HR and managers (RLS: their reports'): onboardings by
+  status (`?status=`, in progress by default). `/hr/onboarding/:id` — one
+  onboarding's checklist; tick (managers: their own department's tasks),
+  complete or cancel (HR). `/hr/offboarding` — HR and managers (RLS: never their own):
   offboardings by status (`?status=`). `/hr/offboarding/:id` — details
   (HR), tick tasks, sign off, cancel (HR).
 - `/finance/payroll` — HR, finance admins, company admins: payrolls by month,
@@ -208,7 +211,8 @@ behaviour).
 - `/company/departments`, `/company/designations`, `/company/kpis`,
   `/company/expectations`, `/company/branding`, `/configuration/onboarding`,
   `/configuration/offboarding` —
-  company admins only.
+  company admins only. The checklists filter by department in `?department=`
+  (its sections and everyone's).
 - `/company/leaves` — HR: tabs *Types* (default yearly quota per type) and
   *Quotas* (per-person overrides for a year); tab kept in `?tab=`.
 - `/company/holidays` — HR: a year's holidays (year picker); add, edit, delete.
@@ -229,7 +233,8 @@ behaviour).
   `bind_employee`; no row back → error shown and the user is signed out.
 - `isManager` (has direct reports in the org chart) is read once at sign-in;
   it only gates the leave requests page, the *My team* tab, the person
-  page and the offboarding pages — RLS decides what a manager sees.
+  page and the onboarding and offboarding pages — RLS decides what a manager
+  sees.
 - `isHiringTeam` (hiring manager or interviewer on any job, RPC
   `on_hiring_team`) is read the same way and only gates the applications page.
 - `canClaimReimbursements` is the bound row's flag or a payroll role, so it
@@ -252,7 +257,8 @@ behaviour).
   application error messages; application stages: transitions, reason and
   hiring-team rules (mirrors of the SQL), board columns, hire error messages.
 - `onboarding.ts` — onboarding selects (named employee FK), progress, overdue,
-  grouping tasks by section (also offboarding's), reorder helper, error messages.
+  grouping tasks by section (also offboarding's), who may tick a task (mirror
+  of `can_tick_checklist_task`, both kinds), reorder helper, error messages.
 - `salary.ts` — appraisal totals, months, the salary in force (mirror of
   `salary_on`), active / upcoming / past, change %, error messages.
 - `offboarding.ts` — offboarding list select (names from the directory), the
@@ -381,20 +387,27 @@ Full detail in `supabase/schema.sql`.
   who can see the application. A job with
   applications can't be deleted.
 - `onboarding_template_sections` → `onboarding_template_tasks` — the
-  checklist. HR reads, company admins write; `sort_order` set by trigger
-  (last) and changed only by the reorder RPCs, which take every id.
+  checklist. A section may name a department (null = everyone; names unique
+  per department); a person gets everyone's and their department's. HR reads, company admins write; `sort_order` set by trigger (last)
+  and changed only by the reorder RPCs, which take every id.
 - `onboardings` (+ `onboarding_tasks`) — one per employee, created only by
-  `application_hire` with a copy of the checklist (later checklist edits
-  don't reach it); due the day after joining. Status `in_progress` →
-  `completed` / `cancelled` (reason required). HR only; no client writes.
-  Cascades away with the employee.
+  `application_hire`; due the day after joining. Tasks link to their
+  checklist task and keep its section's department; while in progress
+  `onboarding_sync` keeps them in line with the checklist (adds, renames,
+  order, removals; ticks kept). Status `in_progress` → `completed` /
+  `cancelled` (reason required). Visible via `can_see_onboarding`: HR and the
+  org-chart manager. Ticked by HR, or the manager for their own department's
+  tasks (`can_tick_checklist_task`); completed / cancelled by HR. No client
+  writes. Cascades away with the employee.
 - `offboarding_template_sections` → `offboarding_template_tasks` — the
   offboarding checklist; same rules as onboarding's (migration seeds a
   starter one).
 - `offboardings` (+ `offboarding_tasks`) — at most one in progress per
-  employee (partial unique index), closed ones kept; started with a copy of
-  the checklist by `employees_offboarding`. Reason and last working day set
-  by HR. Tasks ticked by HR or the org-chart manager; sign-off (HR, and the
+  employee (partial unique index), closed ones kept; started by
+  `employees_offboarding`; tasks kept in line with the checklist like
+  onboarding's (`offboarding_sync`; a task added clears sign-offs). Reason
+  and last working day set by HR. Tasks ticked by HR, or the org-chart
+  manager for their own department's; sign-off (HR, and the
   manager resolved at the time, if any) needs every task, both details and
   the last day reached; unticking or changing details clears sign-offs. The
   last sign-off completes it and sets the employee's status (left /
@@ -540,10 +553,13 @@ Full detail in `supabase/schema.sql`.
   application left what the viewer can see, the dialog closes.
 - Hire (HR, from offer sent): `application_hire` with company email and
   joining date → employee (status joining, prefilled from the application and
-  job) + onboarding + tasks + stage event, in one transaction. Its undo is
+  job) + onboarding + tasks (`onboarding_sync`) + stage event, in one
+  transaction. Its undo is
   refused while that employee exists (a company admin deletes it first).
+- Checklist edit, or an employee's department change → statement / row
+  triggers run `onboarding_sync` / `offboarding_sync` on those in progress.
 - Offboarding: HR sets status to notice period → `employees_offboarding`
-  starts it (tasks copied) → HR sets details, HR and manager tick tasks →
+  starts it (`offboarding_sync`) → HR sets details, HR and manager tick tasks →
   `offboarding_sign_off` by each → completed, employee left. Status back to
   probation / active cancels it.
 - Peer reviews: `peer_cycle_create` (HR) → questions edited, assignments

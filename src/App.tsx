@@ -97,13 +97,13 @@ function SignedIn() {
             <Route path="/jobs" element={<JobOpenings />} />
             <Route path="/jobs/new" element={<Suspense fallback={spinner}><JobOpeningForm /></Suspense>} />
             <Route path="/jobs/:id" element={<Suspense fallback={spinner}><JobOpeningForm /></Suspense>} />
-            <Route path="/hr/onboarding" element={<Onboarding />} />
-            <Route path="/hr/onboarding/:id" element={<OnboardingDetail />} />
           </>
         )}
-        {/* Managers see their direct reports' offboardings; RLS decides which. */}
+        {/* Managers see their direct reports' onboardings and offboardings; RLS decides which. */}
         {(isHr || isManager) && (
           <>
+            <Route path="/hr/onboarding" element={<Onboarding />} />
+            <Route path="/hr/onboarding/:id" element={<OnboardingDetail />} />
             <Route path="/hr/offboarding" element={<Offboarding />} />
             <Route path="/hr/offboarding/:id" element={<OffboardingDetail />} />
           </>

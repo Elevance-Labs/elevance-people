@@ -14,6 +14,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { useAuth } from '../../auth/AuthProvider'
 import { ConfirmDialog, FormDialog, PageHeader } from '../../components/common'
 import { supabase } from '../../lib/supabase'
 import {
@@ -25,6 +26,7 @@ import {
 import {
   ONBOARDING_WITH_EMPLOYEE,
   bySection,
+  canTickChecklistTask,
   isOverdue,
   onboardingError,
   progressOf,
@@ -32,11 +34,14 @@ import {
 } from '../../lib/onboarding'
 import type { DirectoryEntry, OnboardingTask } from '../../lib/types'
 
-// One new hire's onboarding (HR): their checklist, ticked off task by task,
-// then completed or cancelled (with a reason). No task is required. Every
-// change goes through an RPC; once closed, the checklist is read-only.
+// One new hire's onboarding (HR, and their manager): their checklist, ticked
+// off task by task, then completed or cancelled (with a reason) by HR. No task
+// is required. The manager ticks only the tasks for their own department.
+// Every change goes through an RPC; once closed, the checklist is read-only.
 export default function OnboardingDetail() {
   const { id = '' } = useParams()
+  const { employee, isHr } = useAuth()
+  const viewer = { isHr, departmentId: employee?.department_id ?? null }
   const [onboarding, setOnboarding] = useState<OnboardingWithEmployee | null>(null)
   const [tasks, setTasks] = useState<OnboardingTask[]>([])
   const [people, setPeople] = useState<DirectoryEntry[]>([])
@@ -109,7 +114,8 @@ export default function OnboardingDetail() {
     )
   }
 
-  const name = onboarding.employee?.full_name ?? 'Unknown'
+  // Managers can't read employees: the name comes from the directory.
+  const name = onboarding.employee?.full_name ?? people.find((p) => p.id === onboarding.employee_id)?.full_name ?? 'Unknown'
   const inProgress = onboarding.status === 'in_progress'
   const progress = progressOf(tasks)
   const left = progress.total - progress.done
@@ -120,11 +126,16 @@ export default function OnboardingDetail() {
         title={name}
         subtitle={
           <>
-            Joining {formatDate(onboarding.employee?.date_of_joining ?? null)} · Due {formatDate(onboarding.due_date)}
-            {' · '}
-            <MuiLink component={Link} to={`/employees/${onboarding.employee_id}`}>
-              Employee record
-            </MuiLink>
+            {onboarding.employee && `Joining ${formatDate(onboarding.employee.date_of_joining)} · `}
+            Due {formatDate(onboarding.due_date)}
+            {isHr && (
+              <>
+                {' · '}
+                <MuiLink component={Link} to={`/employees/${onboarding.employee_id}`}>
+                  Employee record
+                </MuiLink>
+              </>
+            )}
           </>
         }
         back="/hr/onboarding"
@@ -136,7 +147,7 @@ export default function OnboardingDetail() {
               color={ONBOARDING_STATUS_COLORS[onboarding.status]}
               variant="outlined"
             />
-            {inProgress && (
+            {inProgress && isHr && (
               <>
                 <Button color="error" onClick={() => setClosing('cancel')}>
                   Cancel onboarding
@@ -165,6 +176,12 @@ export default function OnboardingDetail() {
         <Alert severity="info" sx={{ mb: 2 }}>
           Cancelled by {nameOf(onboarding.cancelled_by)} on {formatDayTime(onboarding.cancelled_at ?? '')}:{' '}
           {onboarding.cancel_reason}
+        </Alert>
+      )}
+
+      {!isHr && inProgress && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          You can tick the tasks for your department. HR does the rest, and completes the onboarding.
         </Alert>
       )}
 
@@ -199,7 +216,7 @@ export default function OnboardingDetail() {
                 <Box key={t.id}>
                   <FormControlLabel
                     label={t.title}
-                    disabled={!inProgress || pending !== null}
+                    disabled={!inProgress || pending !== null || !canTickChecklistTask(t, viewer)}
                     control={<Checkbox checked={!!t.done_at} onChange={() => toggle(t)} />}
                     sx={{ '& .MuiFormControlLabel-label': { textDecoration: t.done_at ? 'line-through' : undefined } }}
                   />
