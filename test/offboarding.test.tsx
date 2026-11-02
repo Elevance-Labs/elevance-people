@@ -166,6 +166,17 @@ await choose('Status', 'Notice period')
 check('putting someone on notice says it starts their offboarding',
   field('Status')?.textContent?.includes('Saving starts their offboarding'), field('Status')?.textContent)
 
+reset()
+signInAs(PEOPLE.hr)
+table('employees').find((e) => e.id === 'e-sara')!.status = 'notice_period'
+await mountApp('/employees/e-sara')
+await choose('Status', 'Extended probation')
+check('back to extended probation from notice says it cancels their offboarding',
+  field('Status')?.textContent?.includes('Saving cancels their offboarding'), field('Status')?.textContent)
+await click(button('Save changes'))
+check('…and saves the new status',
+  captured.updates.find((u) => u.table === 'employees')?.values.status === 'extended_probation')
+
 // ============================== Configuration → Offboarding ==============================
 
 reset()

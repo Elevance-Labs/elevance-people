@@ -5,7 +5,7 @@ export type PayrollListRow = Payroll & { items: Pick<PayrollItem, 'net_salary'>[
 export const PAYROLL_LIST = '*, items:payroll_items(net_salary)'
 
 // Who can be on a payroll. Mirrors public.is_login_status.
-export const PAYABLE_STATUSES: EmployeeStatus[] = ['probation', 'active', 'notice_period']
+export const PAYABLE_STATUSES: EmployeeStatus[] = ['probation', 'extended_probation', 'active', 'notice_period']
 
 // The columns each side edits. payroll_items_guard refuses the other side's.
 export const HR_FIELDS = ['basic_salary', 'contractual_amount', 'absent_days', 'hr_remarks'] as const

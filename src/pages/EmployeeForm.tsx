@@ -38,6 +38,7 @@ const EMPTY = {
   full_name: '',
   company_email: '',
   date_of_joining: '',
+  probation_end_date: '',
   date_of_separation: '',
   personal_email: '',
   phone: '',
@@ -76,6 +77,7 @@ function friendlyError(error: { code?: string; message: string }, form: FormStat
     return form.login_method === 'password'
       ? `A password login needs an address outside @${COMPANY_DOMAIN}.`
       : `Company email must be an @${COMPANY_DOMAIN} address.`
+  if (error.message.includes('employees_probation_end')) return 'Probation can\'t end before the date of joining.'
   if (error.message.includes('employees_designation')) return 'Pick a designation from the selected department.'
   return error.message
 }
@@ -409,7 +411,7 @@ export default function EmployeeForm() {
                       helperText:
                         form.status === 'notice_period' && employee?.status !== 'notice_period'
                           ? 'Saving starts their offboarding'
-                          : employee?.status === 'notice_period' && ['probation', 'active'].includes(form.status)
+                          : employee?.status === 'notice_period' && ['probation', 'extended_probation', 'active'].includes(form.status)
                             ? 'Saving cancels their offboarding'
                             : undefined,
                     })}
@@ -419,6 +421,9 @@ export default function EmployeeForm() {
                 </Cell>
                 <Cell>
                   <TextField {...field('date_of_joining', 'Date of joining', { type: 'date', required: true })} />
+                </Cell>
+                <Cell>
+                  <TextField {...field('probation_end_date', 'Probation end date', { type: 'date' })} />
                 </Cell>
                 <Cell>
                   <TextField {...field('date_of_separation', 'Date of separation', { type: 'date' })} />

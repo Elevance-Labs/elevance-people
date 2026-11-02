@@ -28,7 +28,7 @@ import type { DirectoryEntry, Employee, Reimbursement, ReimbursementStatus } fro
 
 const STATUSES = Object.keys(REIMBURSEMENT_STATUS_LABELS) as ReimbursementStatus[]
 // Statuses that may log in (is_login_status): the people who can be allowed to claim.
-const LOGIN_STATUSES = ['probation', 'active', 'notice_period']
+const LOGIN_STATUSES = ['probation', 'extended_probation', 'active', 'notice_period']
 
 type Claimant = Pick<Employee, 'id' | 'full_name' | 'employee_number' | 'status' | 'can_claim_reimbursements'>
 

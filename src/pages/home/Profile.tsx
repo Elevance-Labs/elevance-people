@@ -42,7 +42,7 @@ const TABS = [
 ];
 
 const COLUMNS =
-  "id, employee_number, full_name, company_email, date_of_joining, date_of_separation, personal_email, phone, " +
+  "id, employee_number, full_name, company_email, date_of_joining, probation_end_date, date_of_separation, personal_email, phone, " +
   "cnic_number, cnic_expiry, dob, bank, iban, emergency_contact, employment_type, status, " +
   "department:departments!employees_department_id_fkey(name), designation:designations!employees_designation_fkey(title)";
 
@@ -127,6 +127,12 @@ function ProfileDetails({ record }: { record: OwnRecord }) {
           label="Date of joining"
           value={formatDate(record.date_of_joining)}
         />
+        {record.probation_end_date && (
+          <Detail
+            label="Probation end date"
+            value={formatDate(record.probation_end_date)}
+          />
+        )}
         {record.date_of_separation && (
           <Detail
             label="Date of separation"

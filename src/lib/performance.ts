@@ -35,6 +35,19 @@ export const recentCycles = (count = 6) => Array.from({ length: count }, (_, i) 
 // Mirrors the generated due_date: the 10th of the month after.
 export const dueDateOf = (period: string) => `${addMonths(period, 1).slice(0, 8)}10`
 
+// How long until a due date, or how long past it, in days.
+export function dueCountdown(due: string, today = todayIso()) {
+  const days = Math.round((new Date(`${due}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / 86400000)
+  const label =
+    days > 1 ? `${days} days left` : days === 1 ? '1 day left' : days === 0 ? 'due today'
+      : days === -1 ? '1 day overdue' : `${-days} days overdue`
+  return { days, overdue: days < 0, label }
+}
+
+// A due date in full, e.g. "Tue, 10 Nov 2026".
+export const longDate = (date: string) =>
+  new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+
 export const monthLabel = (period: string) =>
   parse(period).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 

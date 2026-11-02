@@ -17,14 +17,14 @@ import {
 import { useAuth } from '../../auth/AuthProvider'
 import { supabase } from '../../lib/supabase'
 import { formatDate, formatDay } from '../../lib/constants'
+import { dueDateOf, monthLabel } from '../../lib/performance'
 import {
   FEEDBACK_STATE_COLORS,
   FEEDBACK_STATE_LABELS,
   FEEDBACK_WITH_ANSWERS,
+  closesOf,
   feedbackState,
-  feedbackWindow,
   managerFeedbackError,
-  quarterName,
   type FeedbackWithAnswers,
 } from '../../lib/managerFeedback'
 import type { DirectoryEntry, ManagerFeedbackAnswer } from '../../lib/types'
@@ -78,8 +78,9 @@ export default function ManagerFeedbackForm() {
   if (loading) return <LinearProgress />
   if (!draft || !saved) return <Alert severity="error">{error}</Alert>
 
-  const period = feedbackWindow(draft.year, draft.quarter)
-  const state = feedbackState(draft, period)
+  const due = dueDateOf(draft.period)
+  const closes = closesOf(draft.period)
+  const state = feedbackState(draft, draft.period)
   const mine = draft.employee_id === me
   const editable = mine && !draft.submitted_at && state !== 'missed'
   const manager = (draft.manager_id && names.get(draft.manager_id)) || 'your manager'
@@ -142,7 +143,7 @@ export default function ManagerFeedbackForm() {
     <>
       <PageHeader
         title={mine ? `Feedback on ${manager}` : `${names.get(draft.employee_id) ?? 'Employee'}'s feedback on ${manager}`}
-        subtitle={`${quarterName(draft)} · Due ${formatDate(period.due)}`}
+        subtitle={`${monthLabel(draft.period)} 1:1 · Due ${formatDate(due)}`}
         back={mine ? '/performance' : '/performance?tab=manager'}
         actions={<Chip size="small" label={FEEDBACK_STATE_LABELS[state]} color={FEEDBACK_STATE_COLORS[state]} variant="outlined" />}
       />
@@ -152,8 +153,8 @@ export default function ManagerFeedbackForm() {
           <Alert severity="info" variant="outlined">
             Only HR reads this, with your name. {manager === 'your manager' ? 'Your manager' : manager} never sees it.
             {draft.submitted_at && ` You submitted it on ${formatDay(draft.submitted_at)}; it can't be changed.`}
-            {!draft.submitted_at && state === 'missed' && ` ${quarterName(draft)} ended before it was submitted.`}
-            {editable && ` It's due ${formatDate(period.due)}, and can be submitted late until ${formatDate(period.closes)}.`}
+            {!draft.submitted_at && state === 'missed' && ` Its window closed on ${formatDate(closes)} before it was submitted.`}
+            {editable && ` It's due ${formatDate(due)}, and can be submitted late until ${formatDate(closes)}.`}
           </Alert>
         )}
 

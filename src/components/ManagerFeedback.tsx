@@ -22,65 +22,41 @@ import {
 } from '@mui/material'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
-import { useAuth } from '../auth/AuthProvider'
 import { supabase } from '../lib/supabase'
 import { formatDate, formatDay } from '../lib/constants'
-import { formatScore } from '../lib/performance'
+import { dueCountdown, dueDateOf, formatScore, longDate, monthLabel, recentCycles } from '../lib/performance'
 import {
   FEEDBACK_STATE_COLORS,
   FEEDBACK_STATE_LABELS,
   FEEDBACK_WITH_ANSWERS,
   MAX_QUESTIONS,
   MIN_QUESTIONS,
+  closesOf,
   feedbackState,
-  feedbackWindow,
-  isOpen,
   managerFeedbackError,
-  quarterName,
-  recentQuarters,
-  upcomingWindow,
-  windowOf,
   type FeedbackWithAnswers,
 } from '../lib/managerFeedback'
-import type { DirectoryEntry, ManagerFeedback, ManagerFeedbackDue, ManagerFeedbackQuestion } from '../lib/types'
+import type { DirectoryEntry, ManagerFeedbackDue, ManagerFeedbackQuestion, OneOnOne } from '../lib/types'
 import { PersonAvatar } from './common'
 
 /**
- * The signed-in person's feedback on their manager this quarter: when it
- * opens, starting or continuing it, or that it's done. Nothing for someone
- * without a manager in the org chart.
+ * The signed-in person's current 1:1 (last month's), as soon as it's due:
+ * the due date, where their manager's review of them stands (they read it
+ * once submitted), and their own feedback on the manager. Nothing for
+ * someone not due one (no manager, or joined since).
  */
-export function MyManagerFeedback() {
-  const { employee } = useAuth()
-  const me = employee!.id
+export function MyOneOnOne() {
   const navigate = useNavigate()
-  const period = useMemo(() => windowOf(), [])
-  const [manager, setManager] = useState<string | null>(null)
-  const [form, setForm] = useState<Pick<ManagerFeedback, 'id' | 'submitted_at' | 'late'> | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [row, setRow] = useState<OneOnOne | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
 
   useEffect(() => {
-    Promise.all([
-      supabase.from('org_chart_nodes').select('manager_id').eq('employee_id', me).maybeSingle(),
-      supabase
-        .from('manager_feedback')
-        .select('id, submitted_at, late')
-        .eq('employee_id', me)
-        .eq('year', period.year)
-        .eq('quarter', period.quarter)
-        .maybeSingle(),
-    ]).then(async ([nodeRes, formRes]) => {
-      const managerId = (nodeRes.data as { manager_id: string | null } | null)?.manager_id
-      if (managerId) {
-        const { data } = await supabase.from('employee_directory').select('full_name').eq('id', managerId).maybeSingle()
-        setManager((data as { full_name: string } | null)?.full_name ?? 'your manager')
-      }
-      setForm(formRes.data as Pick<ManagerFeedback, 'id' | 'submitted_at' | 'late'> | null)
-      setLoading(false)
-    })
-  }, [me, period])
+    supabase
+      .rpc('my_one_on_one')
+      .maybeSingle()
+      .then(({ data }) => setRow((data as OneOnOne | null) ?? null))
+  }, [])
 
   async function start() {
     setStarting(true)
@@ -91,41 +67,74 @@ export function MyManagerFeedback() {
     navigate(`/performance/manager-feedback/${data as string}`)
   }
 
-  if (loading || (!manager && !form)) return null
-  const open = isOpen(period)
-  const state = feedbackState(form, period)
-  const next = upcomingWindow()
+  if (!row) return null
+  const manager = row.manager_name ?? 'your manager'
+  const countdown = dueCountdown(row.due_date)
+  const feedback = feedbackState(row.feedback_id ? { submitted_at: row.feedback_submitted_at, late: null } : null, row.period)
+  const allDone = row.review_status === 'submitted' && !!row.feedback_submitted_at
+  const review =
+    row.review_status === 'submitted'
+      ? { label: 'Submitted', color: 'success' as const }
+      : row.review_status === 'draft'
+        ? { label: 'In progress', color: 'info' as const }
+        : { label: 'Not started', color: 'default' as const }
 
   return (
-    <Paper variant="outlined" component="section" aria-label="Feedback on your manager" sx={{ p: { xs: 2, sm: 3 } }}>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: { sm: 'center' } }}>
-        <Box sx={{ flexGrow: 1 }}>
-          <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600 }}>
-            Feedback on your manager
-          </Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-            {form?.submitted_at
-              ? `Your ${quarterName(period)} feedback on ${manager ?? 'your manager'} is in. Thank you.`
-              : open
-                ? `Your ${quarterName(period)} feedback on ${manager} is due ${formatDate(period.due)}. Only HR reads it.`
-                : `Once a quarter, from the 1st to the 10th of its last month. Next: ${formatDate(next.opens)} – ${formatDate(next.due)}.`}
-          </Typography>
-        </Box>
-        {(open || form) && <Chip size="small" label={FEEDBACK_STATE_LABELS[state]} color={FEEDBACK_STATE_COLORS[state]} variant="outlined" />}
-        {form ? (
-          <Button onClick={() => navigate(`/performance/manager-feedback/${form.id}`)} variant={form.submitted_at ? 'text' : 'contained'}>
-            {form.submitted_at ? 'View' : 'Continue'}
-          </Button>
-        ) : (
-          open && (
-            <Button variant="contained" onClick={start} loading={starting}>
-              Give feedback
+    <Paper variant="outlined" component="section" aria-label="Your 1:1" sx={{ p: { xs: 2, sm: 3 } }}>
+      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
+        <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600, flexGrow: 1 }}>
+          Your {monthLabel(row.period)} 1:1 with {manager}
+        </Typography>
+        <Chip
+          label={allDone ? 'All done' : `Due ${longDate(row.due_date)} · ${countdown.label}`}
+          color={allDone ? 'success' : countdown.overdue ? 'error' : countdown.days <= 3 ? 'warning' : 'info'}
+        />
+      </Stack>
+      <Stack divider={<Divider flexItem />} sx={{ mt: 1.5 }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ py: 1.5, alignItems: { sm: 'center' } }}>
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+              Your review, from {manager}
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              {row.review_status === 'submitted'
+                ? 'Ready to read.'
+                : `${manager} fills it in at your 1:1; you can read it once it's submitted.`}
+            </Typography>
+          </Box>
+          <Chip size="small" label={review.label} color={review.color} variant="outlined" />
+          {row.review_status === 'submitted' && row.review_id && (
+            <Button onClick={() => navigate(`/performance/reviews/${row.review_id}`)}>Read</Button>
+          )}
+        </Stack>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ py: 1.5, alignItems: { sm: 'center' } }}>
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+              Your feedback on {manager}
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              {row.feedback_submitted_at ? 'In. Thank you.' : `Only HR reads it; ${manager} never sees it.`}
+            </Typography>
+          </Box>
+          <Chip size="small" label={FEEDBACK_STATE_LABELS[feedback]} color={FEEDBACK_STATE_COLORS[feedback]} variant="outlined" />
+          {row.feedback_id ? (
+            <Button
+              onClick={() => navigate(`/performance/manager-feedback/${row.feedback_id}`)}
+              variant={row.feedback_submitted_at ? 'text' : 'contained'}
+            >
+              {row.feedback_submitted_at ? 'View' : 'Continue'}
             </Button>
-          )
-        )}
+          ) : (
+            feedback !== 'missed' && (
+              <Button variant="contained" onClick={start} loading={starting}>
+                Give feedback
+              </Button>
+            )
+          )}
+        </Stack>
       </Stack>
       {error && (
-        <Alert severity="error" sx={{ mt: 2 }} onClose={() => setError(null)}>
+        <Alert severity="error" sx={{ mt: 1 }} onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
@@ -134,15 +143,13 @@ export function MyManagerFeedback() {
 }
 
 /**
- * HR: a quarter's feedback on managers — who owes it and its state, each
+ * HR: a month's feedback on managers — who owes it and its state, each
  * manager's averages with every response (and its author), and the questions.
  */
 export function ManagerFeedbackAdmin() {
   const navigate = useNavigate()
-  const quarters = useMemo(() => recentQuarters(), [])
-  const [picked, setPicked] = useState(0)
-  const q = quarters[picked]
-  const period = feedbackWindow(q.year, q.quarter)
+  const months = useMemo(() => recentCycles(), [])
+  const [period, setPeriod] = useState(months[0])
   const [rows, setRows] = useState<ManagerFeedbackDue[]>([])
   const [forms, setForms] = useState<FeedbackWithAnswers[]>([])
   const [names, setNames] = useState<Map<string, string>>(new Map())
@@ -152,8 +159,8 @@ export function ManagerFeedbackAdmin() {
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      supabase.rpc('manager_feedback_due', { p_year: q.year, p_quarter: q.quarter }),
-      supabase.from('manager_feedback').select(FEEDBACK_WITH_ANSWERS).eq('year', q.year).eq('quarter', q.quarter),
+      supabase.rpc('manager_feedback_due', { p_period: period }),
+      supabase.from('manager_feedback').select(FEEDBACK_WITH_ANSWERS).eq('period', period),
       supabase.from('employee_directory').select('id, full_name'),
     ]).then(([dueRes, formsRes, peopleRes]) => {
       const failure = dueRes.error ?? formsRes.error ?? peopleRes.error
@@ -166,7 +173,7 @@ export function ManagerFeedbackAdmin() {
       }
       setLoading(false)
     })
-  }, [q.year, q.quarter])
+  }, [period])
 
   const nameOf = (id: string | null) => (id && names.get(id)) || 'Someone no longer here'
   const submitted = forms.filter((f) => f.submitted_at)
@@ -178,19 +185,19 @@ export function ManagerFeedbackAdmin() {
         <Stack direction="row" spacing={2} sx={{ p: 2, alignItems: 'center', flexWrap: 'wrap', rowGap: 1.5 }}>
           <TextField
             select
-            label="Quarter"
-            value={String(picked)}
-            onChange={(e) => setPicked(Number(e.target.value))}
-            sx={{ minWidth: 160 }}
+            label="Month reviewed"
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            sx={{ minWidth: 200 }}
           >
-            {quarters.map((x, i) => (
-              <MenuItem key={quarterName(x)} value={String(i)}>
-                {quarterName(x)}
+            {months.map((m) => (
+              <MenuItem key={m} value={m}>
+                {monthLabel(m)}
               </MenuItem>
             ))}
           </TextField>
           <Typography variant="body2" sx={{ color: 'text.secondary', flexGrow: 1 }}>
-            Opens {formatDate(period.opens)}, due {formatDate(period.due)}, closes {formatDate(period.closes)}
+            Given at the 1:1, due {formatDate(dueDateOf(period))}, closes {formatDate(closesOf(period))}
             {!loading && ` · ${submitted.length} of ${rows.length} submitted`}
           </Typography>
         </Stack>
@@ -226,11 +233,7 @@ export function ManagerFeedbackAdmin() {
                     </TableCell>
                     <TableCell>{r.manager_name ?? '—'}</TableCell>
                     <TableCell>
-                      {state === 'to_do' && !isOpen(period) && !r.feedback_id ? (
-                        <Chip size="small" label="Not open yet" variant="outlined" />
-                      ) : (
-                        <Chip size="small" label={FEEDBACK_STATE_LABELS[state]} color={FEEDBACK_STATE_COLORS[state]} variant="outlined" />
-                      )}
+                      <Chip size="small" label={FEEDBACK_STATE_LABELS[state]} color={FEEDBACK_STATE_COLORS[state]} variant="outlined" />
                     </TableCell>
                     <TableCell>{r.submitted_at ? formatDay(r.submitted_at) : '—'}</TableCell>
                   </TableRow>
@@ -239,7 +242,7 @@ export function ManagerFeedbackAdmin() {
               {!loading && !rows.length && (
                 <TableRow>
                   <TableCell colSpan={4} sx={{ py: 8, textAlign: 'center', color: 'text.secondary' }}>
-                    Nobody owes feedback on a manager for {quarterName(q)}.
+                    Nobody owes feedback on a manager for {monthLabel(period)}.
                   </TableCell>
                 </TableRow>
               )}

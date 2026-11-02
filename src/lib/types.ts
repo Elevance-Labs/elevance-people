@@ -5,6 +5,7 @@ export type LoginMethod = 'google' | 'password'
 export type EmployeeStatus =
   | 'joining'
   | 'probation'
+  | 'extended_probation'
   | 'active'
   | 'notice_period'
   | 'left'
@@ -34,6 +35,8 @@ export interface Employee {
   login_method: LoginMethod
   // Set by HR: may claim reimbursements.
   can_claim_reimbursements: boolean
+  // Set by HR; never before joining.
+  probation_end_date: string | null
   created_at: string
   updated_at: string
 }
@@ -712,16 +715,16 @@ export interface ManagerFeedbackQuestion {
   sort_order: number
 }
 
-// One employee's feedback on their manager for a quarter. Made by
+// One employee's feedback on their manager, given at a monthly 1:1. Made by
 // manager_feedback_start and submitted by manager_feedback_submit; the
 // employee writes body (and the answers' ratings) while unsubmitted.
 export interface ManagerFeedback {
   id: string
   employee_id: string
   manager_id: string | null
-  year: number
-  quarter: number
-  // The 10th of the quarter's last month.
+  // The month the 1:1 reviewed, as its first day (YYYY-MM-01).
+  period: string
+  // The 10th of the month after.
   due_date: string
   body: string | null
   created_at: string
@@ -738,7 +741,7 @@ export interface ManagerFeedbackAnswer {
   rating: number | null
 }
 
-// A row of manager_feedback_due: someone who owes feedback that quarter.
+// A row of manager_feedback_due: someone who owes feedback for that month.
 export interface ManagerFeedbackDue {
   employee_id: string
   full_name: string
@@ -748,4 +751,18 @@ export interface ManagerFeedbackDue {
   due_date: string
   submitted_at: string | null
   late: boolean | null
+}
+
+// The row my_one_on_one returns: the caller's current 1:1 (last month's), the
+// state of their manager's review of them and of their feedback on the manager.
+export interface OneOnOne {
+  period: string
+  due_date: string
+  manager_id: string | null
+  manager_name: string | null
+  review_id: string | null
+  review_status: ReviewStatus | null
+  review_submitted_at: string | null
+  feedback_id: string | null
+  feedback_submitted_at: string | null
 }

@@ -339,6 +339,7 @@ signInAs(PEOPLE.member)
 Object.assign(table('employees').find((e) => e.id === 'e-sara')!, {
   phone: '0300 1234567', cnic_number: '35202-1234567-1', cnic_expiry: '2030-05-01', dob: '1996-03-14',
   bank: 'Meezan Bank', iban: 'PK36MEZN0001234567890', emergency_contact: 'Ali Iqbal, brother\n0321 7654321',
+  probation_end_date: '2024-07-15',
   // Changed by HR after sign-in: the page reads the record fresh.
   designation_id: 'g-lead',
 })
@@ -362,7 +363,7 @@ check('the header shows who I am, as on record now',
 check('…and my details, read from the record',
   detail('Company email') === 'sara@elevancelabs.com' && detail('Department') === 'Engineering' &&
   detail('Designation') === 'Engineering Lead' && detail('Employment type') === 'Full-time' &&
-  detail('Date of joining') === 'Jan 15, 2024' &&
+  detail('Date of joining') === 'Jan 15, 2024' && detail('Probation end date') === 'Jul 15, 2024' &&
   detail('Phone number') === '0300 1234567' && detail('CNIC number') === '35202-1234567-1' &&
   detail('CNIC expiry') === 'May 1, 2030' && detail('Date of birth') === 'Mar 14, 1996' &&
   detail('Bank') === 'Meezan Bank' && detail('IBAN') === 'PK36MEZN0001234567890' &&

@@ -15,7 +15,7 @@ behaviour).
   **employee records** (with documents), **org chart**, **appraisals**
   (salary history), **performance**
   (monthly 1:1 reviews: KPIs, expectations, quarterly goal; HR feedback;
-  quarterly peer reviews; quarterly feedback on one's manager),
+  quarterly peer reviews; feedback on one's manager at each monthly 1:1),
   **leaves** (types,
   quotas, requests, two-step approval, public holidays), **hiring** (job openings, each with a
   public application page; an applications board with stages), **human
@@ -78,7 +78,9 @@ behaviour).
   `peer_review_submit` (final), and a subject reads responses about them
   only through `my_peer_feedback` (anonymised). Feedback on one's manager is
   made only by `manager_feedback_start` and submitted only by
-  `manager_feedback_submit` (final); nothing sets a quarter up.
+  `manager_feedback_submit` (final), for the month of the current 1:1;
+  nothing sets a month up. An employee learns the state of their manager's
+  draft review only through `my_one_on_one` (state, not contents).
   A reimbursement claim is inserted in review, by its employee while HR
   allows them to claim, or by a payroll role for anyone who may log in
   (`reimbursements_guard`, which stamps the creator); it moves only through
@@ -137,8 +139,8 @@ behaviour).
   link, for password logins); no other routes exist until signed in.
 - `/dashboard` — everyone; the landing page. Performance reminders (reviews
   to submit, own reviews and HR feedback to acknowledge, peer reviews to
-  write, feedback on one's manager while open, HR: a quarter with no peer
-  reviews), pinned announcements (body
+  write, feedback on one's manager at the current 1:1, HR: a quarter with no
+  peer reviews), pinned announcements (body
   only; *View all* opens the drawer in `components/Announcements.tsx` with the
   last 4 months'), offboarding reminders (HR and managers: to sign off; managers: a
   report leaving), appraisals to approve (company admins), own leave balance and upcoming leave, upcoming holidays, then the company values
@@ -166,9 +168,10 @@ behaviour).
   reports' reviews for a month, `?month=`, start one), *Peer reviews*
   (anyone asked for one: their forms), *People* (HR: everyone due a review),
   *Peer cycles* (HR: each quarter's peer reviews, set one up), *Manager
-  feedback* (HR: a quarter's feedback on managers, `?tab=manager`, and its
-  questions). The *Me* tab also asks for this quarter's feedback on one's
-  manager while it's open. `/performance/reviews/:id`
+  feedback* (HR: a month's feedback on managers, `?tab=manager`, and its
+  questions). The *Me* tab starts with the current 1:1 (`my_one_on_one`):
+  due date, the review's state, and one's feedback on the manager. *My team*
+  and the review form show the due date prominently. `/performance/reviews/:id`
   — everyone (RLS decides): the form for the current manager while a draft,
   read-only otherwise (submit asks to confirm); acknowledge (the employee).
   `/performance/people/:id` — HR and managers: one person's report and reviews,
@@ -273,9 +276,10 @@ behaviour).
 - `peerReviews.ts` — peer review selects, quarters and labels, a form's
   state (to do, overdue, submitted, missed), per-question averages, the
   question and response limits (mirrors of the SQL), error messages.
-- `managerFeedback.ts` — feedback-on-manager select, a quarter's window
-  (opens, due, closes — mirrors of the SQL), a form's state, recent
-  quarters, the question limits, error messages.
+- `managerFeedback.ts` — feedback-on-manager select, when a month's form
+  closes (mirror of `manager_feedback_closes`), a form's state, the question
+  limits, error messages. The due date and its countdown are in
+  `performance.ts`.
 - `reimbursements.ts` — claim select, what a viewer may do to a claim
   (mirror of `reimbursement_move` / `_disburse`), the receipt and reference
   limits, file checks, reimbursements-bucket upload / remove, error messages.
@@ -311,9 +315,10 @@ behaviour).
   (person page).
 - `components/PeerReviews.tsx` — a reviewer's forms list, HR's cycles list
   and set-up dialog, and the subject's anonymised peer feedback (Me tab).
-- `components/ManagerFeedback.tsx` — the employee's card for this quarter's
-  feedback on their manager (Me tab), and HR's tab: who owes it, averages
-  per manager with names, the questions.
+- `components/ManagerFeedback.tsx` — the employee's current 1:1 card (Me tab:
+  due date, their review's state, their feedback on the manager), and HR's
+  tab: who owes feedback for a month, averages per manager with names, the
+  questions.
 - `components/Reimbursements.tsx` — claim status chip, and the claim dialog
   (details, receipts, history, and the viewer's actions: withdraw, approve,
   reject, process, disburse); shared by both reimbursement pages.
@@ -337,7 +342,7 @@ Full detail in `supabase/schema.sql`.
   `user_id` set only by `bind_employee`; neither is client-writable.
   `login_method` (`google`, the default: company domain only; `password`:
   an outside address only, check constraint). Statuses
-  `probation` / `active` / `notice_period` may log in (`is_login_status`).
+  `probation` / `extended_probation` / `active` / `notice_period` may log in (`is_login_status`).
   `can_claim_reimbursements` is set by HR. Linked to a department and a designation (both optional; a designation needs
   its department, and the FK keeps them consistent). HR reads/writes all; a
   member reads only their own row.
@@ -496,15 +501,17 @@ Full detail in `supabase/schema.sql`.
   shuffled. `is_peer_reviewer_in` / `peer_cycle_status_of` let the policies
   refer to each other without recursion.
 - `manager_feedback_questions` (HR only; 3–5 kept by trigger; seeded) →
-  `manager_feedback` (one per employee and quarter, with the manager at the
-  time; due the 10th of the quarter's last month, generated) +
-  `manager_feedback_answers` (the questions copied in). Made only by
-  `manager_feedback_start` in the quarter's last month (login status, a
-  manager, joined by its 1st); the author writes the text and ratings until
-  submitted or `quarter_end`, by trigger; `manager_feedback_submit` stamps
-  `late` after the 10th. RLS: the author their own; HR all but feedback
-  about themselves; never the manager. `manager_feedback_due` — HR: who
-  owes it that quarter, not rows about the caller.
+  `manager_feedback` (one per employee and reviewed month, `period`, with the
+  manager at the time; due the 10th of the month after, generated, as the
+  review) + `manager_feedback_answers` (the questions copied in). Made only
+  by `manager_feedback_start`, for the current 1:1's month (a manager,
+  joined by its 1st); the author writes the text and ratings until submitted
+  or `manager_feedback_closes` (end of the month after), by trigger;
+  `manager_feedback_submit` stamps `late` after the 10th. RLS: the author
+  their own; HR all but feedback about themselves; never the manager.
+  `manager_feedback_due` — HR: who owes it for a month, not rows about the
+  caller. `my_one_on_one` — the caller's current 1:1: due date, manager, the
+  review's state (not contents) and their feedback's.
 - `branding` — one row: logo path, primary colour, perks (jsonb checked by
   `valid_perks`). Everyone signed in reads, company admins update; anon gets
   it via `public_branding`. Logo in the public `branding` bucket.
@@ -561,14 +568,16 @@ Full detail in `supabase/schema.sql`.
 - Offboarding: HR sets status to notice period → `employees_offboarding`
   starts it (`offboarding_sync`) → HR sets details, HR and manager tick tasks →
   `offboarding_sign_off` by each → completed, employee left. Status back to
-  probation / active cancels it.
+  probation / extended probation / active cancels it.
 - Peer reviews: `peer_cycle_create` (HR) → questions edited, assignments
   added → `peer_cycle_open` (answers made) → reviewers save and
   `peer_review_submit` → `peer_cycle_close` → subjects read
   `my_peer_feedback`.
-- Feedback on one's manager: the quarter's last month opens it (no job) →
-  *Give feedback* → `manager_feedback_start` → saved as the author goes →
-  `manager_feedback_submit` → HR reads it.
+- The monthly 1:1: from the 1st, `my_one_on_one` shows the employee their
+  1:1 and `performance_due` the manager theirs (no job) → the manager's
+  review (`review_start` → `review_submit`) and the employee's *Give
+  feedback* (`manager_feedback_start` → `manager_feedback_submit`), both due
+  the 10th → the employee reads the review; HR reads the feedback.
 - Monthly review: `review_start` (manager, from *My team*) → draft saved as
   the lines and review row are updated → `review_submit` → the employee reads
   it and `review_acknowledge`s. Nothing reopens a submitted review.

@@ -53,6 +53,7 @@ export const EMPLOYMENT_TYPE_LABELS: Record<EmploymentType, string> = {
 export const STATUS_LABELS: Record<EmployeeStatus, string> = {
   joining: 'Joining',
   probation: 'Probation',
+  extended_probation: 'Extended probation',
   active: 'Active',
   notice_period: 'Notice period',
   left: 'Left',
@@ -62,6 +63,7 @@ export const STATUS_LABELS: Record<EmployeeStatus, string> = {
 export const STATUS_COLORS: Record<EmployeeStatus, ChipProps['color']> = {
   joining: 'info',
   probation: 'warning',
+  extended_probation: 'warning',
   active: 'success',
   notice_period: 'secondary',
   left: 'default',

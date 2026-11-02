@@ -22,7 +22,7 @@
 create type public.app_role as enum ('company_admin', 'hr_admin', 'finance_admin', 'member');
 create type public.employment_type as enum ('full_time', 'part_time', 'freelance', 'contract');
 create type public.employee_status as enum
-  ('joining', 'probation', 'active', 'notice_period', 'left', 'terminated');
+  ('joining', 'probation', 'extended_probation', 'active', 'notice_period', 'left', 'terminated');
 -- How a person signs in: their @elevancelabs.com Google account, or (for
 -- someone without one) an outside address with email and password.
 create type public.login_method as enum ('google', 'password');
@@ -146,6 +146,8 @@ create table public.employees (
   login_method       public.login_method not null default 'google',
   -- Set by HR: may claim reimbursements.
   can_claim_reimbursements boolean not null default false,
+  -- Set by HR; never before joining.
+  probation_end_date date,
   -- Company addresses always sign in with Google; anything else only by password.
   constraint employees_company_email_check
     check (company_email = lower(company_email)
@@ -159,7 +161,9 @@ create table public.employees (
   constraint employees_designation_fkey foreign key (designation_id, department_id)
     references public.designations (id, department_id) on update cascade on delete restrict,
   constraint employees_designation_needs_department
-    check (designation_id is null or department_id is not null)
+    check (designation_id is null or department_id is not null),
+  constraint employees_probation_end_check
+    check (probation_end_date is null or probation_end_date >= date_of_joining)
 );
 create index employees_department_idx on public.employees (department_id);
 create index employees_designation_idx on public.employees (designation_id, department_id);
@@ -1003,10 +1007,10 @@ create table public.peer_review_answers (
   constraint peer_review_answers_question_key unique (assignment_id, question_id)
 );
 
--- Quarterly feedback on one's manager: one form per employee and quarter,
--- made when they open it in the quarter's last month (manager_feedback_start),
--- with HR's questions copied in. Only HR reads them; never the manager.
--- The questions every quarter's form copies when it starts.
+-- Feedback on one's manager, at each monthly 1:1: one form per employee and
+-- reviewed month, made when they open it (manager_feedback_start), with HR's
+-- questions copied in. Only HR reads them; never the manager.
+-- The questions every form copies when it starts.
 create table public.manager_feedback_questions (
   id         uuid primary key default gen_random_uuid(),
   prompt     text not null check (prompt = trim(prompt) and prompt <> '' and length(prompt) <= 500),
@@ -1024,23 +1028,23 @@ create table public.manager_feedback (
   employee_id  uuid not null,
   -- Their manager when the form was started.
   manager_id   uuid,
-  year         integer not null check (year between 2000 and 2999),
-  quarter      integer not null check (quarter between 1 and 4),
-  -- The 10th of the quarter's last month.
-  due_date     date not null generated always as (make_date(year, quarter * 3, 10)) stored,
   body         text check (length(body) <= 5000),
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   submitted_at timestamptz,
   late         boolean not null default false,
+  -- The month its 1:1 reviewed, as its first day (as for the monthly review).
+  period       date not null check (period = date_trunc('month', period)::date),
+  -- The 10th of the month after.
+  due_date     date not null generated always as ((period + interval '1 month 9 days')::date) stored,
   -- Named: manager_feedback references employees twice.
   constraint manager_feedback_employee_id_fkey foreign key (employee_id)
     references public.employees (id) on delete cascade,
   constraint manager_feedback_manager_id_fkey foreign key (manager_id)
     references public.employees (id) on delete set null,
-  constraint manager_feedback_quarter_key unique (employee_id, year, quarter)
+  constraint manager_feedback_period_key unique (employee_id, period)
 );
-create index manager_feedback_period_idx on public.manager_feedback (year, quarter);
+create index manager_feedback_period_idx on public.manager_feedback (period);
 create index manager_feedback_manager_idx on public.manager_feedback (manager_id);
 
 -- The questions as they were when the form started.
@@ -1067,7 +1071,7 @@ insert into public.manager_feedback_questions (prompt, sort_order) values
 -- Statuses that are allowed to log in. Change here to widen/narrow access.
 create function public.is_login_status(s public.employee_status)
 returns boolean language sql immutable set search_path = '' as $$
-  select s in ('probation', 'active', 'notice_period');
+  select s in ('probation', 'extended_probation', 'active', 'notice_period');
 $$;
 
 create function public.current_employee_id()
@@ -3382,10 +3386,11 @@ language sql stable security definer set search_path = '' as $$
    order by c.year desc, c.quarter desc, 4;
 $$;
 
--- The last day of a quarter: after it, its forms can't be submitted.
-create function public.quarter_end(p_year integer, p_quarter integer)
+-- The last day a reviewed month's feedback can be submitted: the end of the
+-- month after it.
+create function public.manager_feedback_closes(p_period date)
 returns date language sql immutable set search_path = '' as $$
-  select (make_date(p_year, p_quarter * 3, 1) + interval '1 month - 1 day')::date;
+  select (date_trunc('month', p_period) + interval '2 months - 1 day')::date;
 $$;
 
 -- Keeps the list at 3 to 5 questions; a new one goes last.
@@ -3417,7 +3422,7 @@ create trigger manager_feedback_questions_guard
   for each row execute function public.manager_feedback_questions_guard();
 
 -- The text and ratings change only while the form is unsubmitted and its
--- quarter hasn't ended.
+-- month's window hasn't closed.
 create function public.manager_feedback_guard()
 returns trigger language plpgsql security definer set search_path = '' as $$
 declare
@@ -3437,7 +3442,7 @@ begin
     end if;
     select * into v_form from public.manager_feedback where id = new.feedback_id;
   end if;
-  if v_form.submitted_at is not null or public.company_today() > public.quarter_end(v_form.year, v_form.quarter) then
+  if v_form.submitted_at is not null or public.company_today() > public.manager_feedback_closes(v_form.period) then
     raise exception 'This feedback can no longer be changed.';
   end if;
   return new;
@@ -3455,17 +3460,15 @@ create trigger manager_feedback_answers_guard
 -- Manager feedback actions (RPCs). The only way a form is made or submitted.
 -- ---------------------------------------------------------------------------
 
--- The caller's form for this quarter, made the first time they open it: only
--- in the quarter's last month, for someone who may log in, had joined by its
--- first day, and has a manager. Returns its id.
+-- The caller's form for their current 1:1 (last month's), made the first time
+-- they open it: for someone who may log in, had joined by that month's first
+-- day and has a manager — whoever is due a review. Returns its id.
 create function public.manager_feedback_start()
 returns uuid language plpgsql security definer set search_path = '' as $$
 declare
   v_me        uuid := public.current_employee_id();
-  v_today     date := public.company_today();
-  v_year      integer := extract(year from v_today);
-  v_quarter   integer := extract(quarter from v_today);
-  v_opens     date := make_date(v_year, v_quarter * 3, 1);
+  v_period    date := (date_trunc('month', public.company_today()) - interval '1 month')::date;
+  v_employee  public.employees;
   v_manager   uuid;
   v_questions integer;
   v_id        uuid;
@@ -3473,16 +3476,14 @@ begin
   if v_me is null then
     raise exception 'Not signed in.' using errcode = '42501';
   end if;
-  select id into v_id from public.manager_feedback
-   where employee_id = v_me and year = v_year and quarter = v_quarter;
+  select id into v_id from public.manager_feedback where employee_id = v_me and period = v_period;
   if found then
     return v_id;
   end if;
-  if v_today < v_opens then
-    raise exception 'Feedback on your manager opens on %.', to_char(v_opens, 'FMDD Mon YYYY') using errcode = '23514';
-  end if;
-  if (select date_of_joining from public.employees where id = v_me) > v_opens then
-    raise exception 'You joined after this quarter''s feedback opened.' using errcode = '23514';
+  select * into v_employee from public.employees where id = v_me;
+  if v_employee.date_of_joining > v_period then
+    raise exception 'You joined after % began, so there''s no feedback for it.', to_char(v_period, 'FMMonth YYYY')
+      using errcode = '23514';
   end if;
   select manager_id into v_manager from public.org_chart_nodes where employee_id = v_me;
   if v_manager is null then
@@ -3493,8 +3494,8 @@ begin
     raise exception 'HR hasn''t finished setting up the questions yet.' using errcode = '23514';
   end if;
 
-  insert into public.manager_feedback (employee_id, manager_id, year, quarter)
-  values (v_me, v_manager, v_year, v_quarter)
+  insert into public.manager_feedback (employee_id, manager_id, period)
+  values (v_me, v_manager, v_period)
   returning id into v_id;
   insert into public.manager_feedback_answers (feedback_id, prompt, sort_order)
   select v_id, q.prompt, row_number() over (order by q.sort_order) - 1
@@ -3503,8 +3504,8 @@ begin
 end;
 $$;
 
--- Submit one's own form, every question rated, before the quarter ends.
--- After the 10th it is marked late. Final.
+-- Submit one's own form, every question rated, before its month's window
+-- closes. After the 10th it is marked late. Final.
 create function public.manager_feedback_submit(p_feedback_id uuid)
 returns void language plpgsql security definer set search_path = '' as $$
 declare
@@ -3517,8 +3518,9 @@ begin
   if v_form.submitted_at is not null then
     raise exception 'This feedback is already submitted.';
   end if;
-  if public.company_today() > public.quarter_end(v_form.year, v_form.quarter) then
-    raise exception 'Q% % has ended; this feedback can no longer be submitted.', v_form.quarter, v_form.year;
+  if public.company_today() > public.manager_feedback_closes(v_form.period) then
+    raise exception 'The 1:1 for % has passed; this feedback can no longer be submitted.',
+      to_char(v_form.period, 'FMMonth YYYY');
   end if;
   if exists (select 1 from public.manager_feedback_answers where feedback_id = p_feedback_id and rating is null) then
     raise exception 'Rate every question.' using errcode = '23514';
@@ -3529,27 +3531,50 @@ begin
 end;
 $$;
 
--- HR: one quarter's feedback, as a list of who owes it — everyone who may log
--- in, had joined by the first day of the quarter's last month and has a
--- manager — with their form if started (the manager it was started for).
+-- HR: one reviewed month's feedback, as a list of who owes it — whoever is
+-- due a review that month (may log in, had joined by its first day, has a
+-- manager) — with their form if started (the manager it was started for).
 -- Leaves out feedback about the caller.
-create function public.manager_feedback_due(p_year integer, p_quarter integer)
+create function public.manager_feedback_due(p_period date)
 returns table (employee_id uuid, full_name text, manager_id uuid, manager_name text, feedback_id uuid,
                due_date date, submitted_at timestamptz, late boolean)
 language sql stable security definer set search_path = '' as $$
   select e.id, e.full_name, coalesce(f.manager_id, n.manager_id), m.full_name, f.id,
-         make_date(p_year, p_quarter * 3, 10), f.submitted_at, f.late
+         (date_trunc('month', p_period)::date + interval '1 month 9 days')::date, f.submitted_at, f.late
     from public.employees e
     left join public.org_chart_nodes n on n.employee_id = e.id
-    left join public.manager_feedback f on f.employee_id = e.id and f.year = p_year and f.quarter = p_quarter
+    left join public.manager_feedback f
+      on f.employee_id = e.id and f.period = date_trunc('month', p_period)::date
     left join public.employees m on m.id = coalesce(f.manager_id, n.manager_id)
-   where public.is_hr() and p_quarter between 1 and 4
+   where public.is_hr()
      -- Not who has or hasn't written about the HR person looking.
      and coalesce(f.manager_id, n.manager_id) is distinct from public.current_employee_id()
      and (f.id is not null
           or (public.is_login_status(e.status) and n.manager_id is not null
-              and e.date_of_joining <= make_date(p_year, p_quarter * 3, 1)))
+              and e.date_of_joining <= date_trunc('month', p_period)::date))
    order by e.full_name;
+$$;
+
+-- The caller's current 1:1 — last month's — if they are due one: its due
+-- date, their manager, the state of the review of them (not its contents
+-- until submitted, which they read from performance_reviews) and of their
+-- feedback on the manager. No row when they aren't due one.
+create function public.my_one_on_one()
+returns table (period date, due_date date, manager_id uuid, manager_name text, review_id uuid,
+               review_status public.review_status, review_submitted_at timestamptz,
+               feedback_id uuid, feedback_submitted_at timestamptz)
+language sql stable security definer set search_path = '' as $$
+  with c as (select (date_trunc('month', public.company_today()) - interval '1 month')::date as period)
+  select c.period, (c.period + interval '1 month 9 days')::date, coalesce(f.manager_id, n.manager_id),
+         m.full_name, r.id, r.status, r.submitted_at, f.id, f.submitted_at
+    from c
+    join public.employees e on e.id = public.current_employee_id()
+    left join public.org_chart_nodes n on n.employee_id = e.id
+    left join public.performance_reviews r on r.employee_id = e.id and r.period = c.period
+    left join public.manager_feedback f on f.employee_id = e.id and f.period = c.period
+    left join public.employees m on m.id = coalesce(f.manager_id, n.manager_id)
+   where r.id is not null or f.id is not null
+      or (public.is_login_status(e.status) and n.manager_id is not null and e.date_of_joining <= c.period);
 $$;
 
 -- ---------------------------------------------------------------------------
@@ -3759,11 +3784,12 @@ grant select, delete on public.employees to authenticated;
 -- user_id and employee_number are deliberately not writable by clients.
 grant insert (full_name, company_email, date_of_joining, date_of_separation, personal_email,
               phone, cnic_number, cnic_expiry, dob, department_id, designation_id, bank, iban,
-              emergency_contact, employment_type, status, app_role, login_method),
+              emergency_contact, employment_type, status, app_role, login_method,
+              probation_end_date),
       update (full_name, company_email, date_of_joining, date_of_separation, personal_email,
               phone, cnic_number, cnic_expiry, dob, department_id, designation_id, bank, iban,
               emergency_contact, employment_type, status, app_role, login_method,
-              can_claim_reimbursements)
+              can_claim_reimbursements, probation_end_date)
   on public.employees to authenticated;
 
 grant select on public.employee_documents to authenticated;
@@ -3950,8 +3976,8 @@ revoke execute on function
   public.peer_cycle_create(integer, integer, date), public.peer_cycle_open(uuid), public.peer_cycle_close(uuid),
   public.peer_review_submit(uuid), public.my_peer_feedback(), public.is_peer_reviewer_in(uuid),
   public.peer_cycle_status_of(uuid),
-  public.quarter_end(integer, integer), public.manager_feedback_questions_guard(), public.manager_feedback_guard(),
-  public.manager_feedback_start(), public.manager_feedback_submit(uuid), public.manager_feedback_due(integer, integer),
+  public.manager_feedback_closes(date), public.manager_feedback_questions_guard(), public.manager_feedback_guard(),
+  public.manager_feedback_start(), public.manager_feedback_submit(uuid), public.manager_feedback_due(date), public.my_one_on_one(),
   public.can_claim_reimbursements(), public.reimbursements_guard(),
   public.reimbursement_move(uuid, public.reimbursement_status, text),
   public.reimbursement_disburse(uuid, date, text, text)
@@ -3993,8 +4019,8 @@ grant execute on function
   public.peer_cycle_create(integer, integer, date), public.peer_cycle_open(uuid), public.peer_cycle_close(uuid),
   public.peer_review_submit(uuid), public.my_peer_feedback(), public.is_peer_reviewer_in(uuid),
   public.peer_cycle_status_of(uuid),
-  public.quarter_end(integer, integer), public.manager_feedback_start(), public.manager_feedback_submit(uuid),
-  public.manager_feedback_due(integer, integer),
+  public.manager_feedback_closes(date), public.manager_feedback_start(), public.manager_feedback_submit(uuid),
+  public.manager_feedback_due(date), public.my_one_on_one(),
   public.can_claim_reimbursements(),
   public.reimbursement_move(uuid, public.reimbursement_status, text),
   public.reimbursement_disburse(uuid, date, text, text)

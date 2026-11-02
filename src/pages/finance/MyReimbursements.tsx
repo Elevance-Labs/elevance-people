@@ -38,7 +38,7 @@ import type { DirectoryEntry, Reimbursement } from '../../lib/types'
 
 const EMPTY = { employee_id: '', description: '', expense_date: '', amount: '' }
 // Statuses that may log in (is_login_status): who a claim can be made for.
-const LOGIN_STATUSES = ['probation', 'active', 'notice_period']
+const LOGIN_STATUSES = ['probation', 'extended_probation', 'active', 'notice_period']
 
 type Person = Pick<DirectoryEntry, 'id' | 'full_name' | 'status'>
 

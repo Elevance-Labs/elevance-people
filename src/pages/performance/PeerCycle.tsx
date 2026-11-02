@@ -40,7 +40,7 @@ import type { DirectoryEntry, PeerReviewCycle, PeerReviewQuestion } from '../../
 import { ConfirmDialog, PageHeader, PersonAvatar } from '../../components/common'
 
 type Person = Pick<DirectoryEntry, 'id' | 'full_name' | 'designation' | 'status'>
-const LOGIN_STATUSES = ['probation', 'active', 'notice_period']
+const LOGIN_STATUSES = ['probation', 'extended_probation', 'active', 'notice_period']
 
 // Picks one person; clears itself after each pick.
 function PersonPicker({ label, options, onPick }: { label: string; options: Person[]; onPick: (p: Person) => void }) {

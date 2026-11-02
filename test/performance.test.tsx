@@ -110,12 +110,19 @@ check('a manager who is also HR gets Me, My team and People (and the peer review
 check('My team lists only their own reports, with last month’s state',
   !!row('Sara Iqbal') && !row('Bilal Ahmed') && row('Sara Iqbal')!.textContent!.includes('Not started') &&
     text().includes('Due Jun 10, 2026 · 0 of 1 submitted'), text())
+const dueBanner = () => document.querySelector<HTMLElement>('main [aria-label="Due date"]')
+check('the manager sees the due date prominently, counting down, with how many are left',
+  !!dueBanner() && dueBanner()!.textContent!.includes('May 2026 reviews are due') &&
+    dueBanner()!.textContent!.includes('Jun 10, 2026 · 5 days left') && dueBanner()!.textContent!.includes('1 of 1 still to submit'),
+  dueBanner()?.textContent)
 await click(button('Start review', row('Sara Iqbal')))
 check('starting goes through review_start for that month',
   rpcArgs('review_start').join() === JSON.stringify({ p_employee_id: 'e-sara', p_period: '2026-05-01' }),
   rpcArgs('review_start').join())
 check('…and opens the new draft', await waitFor(() => location.pathname.startsWith('/performance/reviews/new-')), location.pathname)
 const reviewId = location.pathname.split('/').at(-1)!
+check('the form shows the due date prominently too',
+  await waitFor(() => !!dueBanner()) && dueBanner()!.textContent!.includes('Jun 10, 2026 · 5 days left'), dueBanner()?.textContent)
 check('the form has the designation’s KPIs and expectations, copied in',
   await waitFor(() => !!section('Code review turnaround')) && !!section('Escaped defects') &&
     !!section('Joins standup') && !!section('Updates tickets daily'), text().slice(0, 500))
@@ -181,6 +188,28 @@ check('submitting goes through review_submit', rpcArgs('review_submit').at(-1) =
 check('…and the review turns read-only, submitted',
   await waitFor(() => text().includes('Submitted by Amna Khan')) && !button('Submit review') &&
     text().includes('Sara Iqbal can now read it.'), text().slice(0, 500))
+
+// ============================== the employee sees their 1:1 ==============================
+const oneOnOne = () => document.querySelector<HTMLElement>('main section[aria-label="Your 1:1"]')
+reset()
+// Amna has started May's review of Sara, and filled some of it in.
+table('performance_reviews').push({
+  id: 'r-may', employee_id: 'e-sara', period: '2026-05-01', due_date: '2026-06-10', status: 'draft', evaluation: 'Secret draft words',
+  feedback: null, goal_set: null, goal_rated: null, goal_progress: null, created_by: 'e-amna', created_at: '2026-06-02T09:00:00Z',
+  updated_at: '2026-06-02T09:00:00Z', submitted_by: null, submitted_at: null, late: false, acknowledged_at: null,
+})
+signInAs(PEOPLE.member)
+await mountApp('/performance')
+check('the employee sees their review is in progress as soon as it’s due',
+  await waitFor(() => !!oneOnOne()) && oneOnOne()!.textContent!.includes('Your review, from Amna Khan') &&
+    oneOnOne()!.textContent!.includes('In progress') && !button('Read', oneOnOne()!), oneOnOne()?.textContent)
+check('…but not what the draft says until it’s submitted', !text().includes('Secret draft words'))
+Object.assign(table('performance_reviews').find((r) => r.id === 'r-may')!, { status: 'submitted', submitted_at: '2026-06-04T09:00:00Z' })
+await mountApp('/performance')
+check('once submitted, it’s there to read', await waitFor(() => !!oneOnOne()?.textContent?.includes('Ready to read.')) &&
+  !!button('Read', oneOnOne()!))
+await click(button('Read', oneOnOne()!))
+check('…opening the review', location.pathname === '/performance/reviews/r-may', location.pathname)
 
 // ============================== HR ==============================
 reset()

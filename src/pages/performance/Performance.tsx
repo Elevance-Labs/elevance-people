@@ -26,6 +26,8 @@ import { formatDate, formatDay } from '../../lib/constants'
 import {
   REVIEW_WITH_LINES,
   currentCycle,
+  dueCountdown,
+  longDate,
   monthLabel,
   recentCycles,
   reviewError,
@@ -37,7 +39,7 @@ import { PageHeader, PersonAvatar } from '../../components/common'
 import { PerformanceReport, ReviewList, ReviewStateChip } from '../../components/Performance'
 import { HrFeedback } from '../../components/HrFeedback'
 import { MyPeerFeedback, PeerCycles, PeerReviewList } from '../../components/PeerReviews'
-import { ManagerFeedbackAdmin, MyManagerFeedback } from '../../components/ManagerFeedback'
+import { ManagerFeedbackAdmin, MyOneOnOne } from '../../components/ManagerFeedback'
 
 // One page for the module; each tab shows to whoever it concerns. The tab
 // lives in the URL (?tab=team), the month on the team and people tabs too
@@ -126,7 +128,7 @@ function MyPerformance() {
           {unread === 1 ? 'A review is' : `${unread} reviews are`} waiting for you to read and acknowledge.
         </Alert>
       )}
-      <MyManagerFeedback />
+      <MyOneOnOne />
       <PerformanceReport reviews={reviews} />
       <HrFeedback employeeId={me} name={employee!.full_name} mode="employee" />
       <MyPeerFeedback />
@@ -198,117 +200,141 @@ function DueList({ scope }: { scope: 'team' | 'people' }) {
   const late = reviewable.filter((r) => ['overdue', 'draft_overdue'].includes(reviewState(r))).length
   const noManager = rows.length - reviewable.length
   const due = rows[0]?.due_date
+  const countdown = due ? dueCountdown(due) : null
+  const left = reviewable.length - submitted
 
   return (
-    <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-      <Stack direction="row" spacing={2} sx={{ p: 2, alignItems: 'center', flexWrap: 'wrap', rowGap: 1.5 }}>
-        <TextField
-          select
-          label="Month reviewed"
-          value={month}
-          onChange={(e) => {
-            const next = new URLSearchParams(params)
-            next.set('month', e.target.value)
-            setParams(next, { replace: true })
-          }}
-          sx={{ minWidth: 200 }}
+    <Stack spacing={2}>
+      {/* The manager's deadline, front and centre: the 1:1s for this month are due by the 10th. */}
+      {scope === 'team' && !loading && countdown && reviewable.length > 0 && (
+        <Alert
+          severity={!left ? 'success' : countdown.overdue ? 'error' : countdown.days <= 3 ? 'warning' : 'info'}
+          variant="filled"
+          aria-label="Due date"
         >
-          {cycles.map((c) => (
-            <MenuItem key={c} value={c}>
-              {monthLabel(c)}
-            </MenuItem>
-          ))}
-        </TextField>
-        {!loading && due && (
-          <Typography variant="body2" sx={{ color: 'text.secondary', flexGrow: 1 }}>
-            Due {formatDate(due)} · {submitted} of {reviewable.length} submitted
-            {late > 0 && ` · ${late} overdue`}
+          <Typography variant="subtitle1" component="p" sx={{ fontWeight: 600 }}>
+            {!left
+              ? `All ${monthLabel(month)} reviews are in.`
+              : `${monthLabel(month)} reviews are due ${longDate(due!)} · ${countdown.label}`}
           </Typography>
-        )}
-        {scope === 'people' && noManager > 0 && (
-          <Chip color="warning" variant="outlined" label={`${noManager} without a manager`} />
-        )}
-      </Stack>
-      {error && (
-        <Alert severity="error" sx={{ mx: 2, mb: 2 }} onClose={() => setError(null)}>
-          {error}
+          {left > 0 && (
+            <Typography variant="body2">
+              {left} of {reviewable.length} still to submit. Hold each 1:1 and submit its review by then; your reports
+              give their feedback on you at the same time.
+            </Typography>
+          )}
         </Alert>
       )}
-      {loading && <LinearProgress />}
-      <TableContainer>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Employee</TableCell>
-              {scope === 'people' && <TableCell>Manager</TableCell>}
-              <TableCell>Review</TableCell>
-              <TableCell>Submitted</TableCell>
-              <TableCell>Acknowledged</TableCell>
-              {scope === 'team' && <TableCell align="right" />}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow
-                key={r.employee_id}
-                hover
-                onClick={scope === 'people' ? () => navigate(`/performance/people/${r.employee_id}`) : undefined}
-                sx={{ cursor: scope === 'people' ? 'pointer' : undefined, '&:last-child td': { borderBottom: 0 } }}
-              >
-                <TableCell>
-                  <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-                    <PersonAvatar name={r.full_name} size={32} />
-                    <Box>
-                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                        {r.full_name}
-                      </Typography>
-                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                        {r.designation ?? 'No designation'}
-                        {scope === 'team' && noted.has(r.employee_id) && ' · Has private notes'}
-                      </Typography>
-                    </Box>
-                  </Stack>
-                </TableCell>
-                {scope === 'people' && (
-                  <TableCell>
-                    {r.manager_name ?? <Chip size="small" color="warning" variant="outlined" label="No manager" />}
-                  </TableCell>
-                )}
-                <TableCell>{r.manager_id ? <ReviewStateChip state={reviewState(r)} /> : '—'}</TableCell>
-                <TableCell>{r.submitted_at ? formatDay(r.submitted_at) : '—'}</TableCell>
-                <TableCell>{r.acknowledged_at ? formatDay(r.acknowledged_at) : '—'}</TableCell>
-                {scope === 'team' && (
-                  <TableCell align="right">
-                    {r.review_id ? (
-                      <Button size="small" onClick={() => navigate(`/performance/reviews/${r.review_id}`)}>
-                        {r.status === 'draft' ? 'Continue' : 'View'}
-                      </Button>
-                    ) : (
-                      <Button
-                        size="small"
-                        variant="contained"
-                        loading={starting === r.employee_id}
-                        onClick={() => start(r)}
-                      >
-                        Start review
-                      </Button>
-                    )}
-                  </TableCell>
-                )}
-              </TableRow>
+      <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+        <Stack direction="row" spacing={2} sx={{ p: 2, alignItems: 'center', flexWrap: 'wrap', rowGap: 1.5 }}>
+          <TextField
+            select
+            label="Month reviewed"
+            value={month}
+            onChange={(e) => {
+              const next = new URLSearchParams(params)
+              next.set('month', e.target.value)
+              setParams(next, { replace: true })
+            }}
+            sx={{ minWidth: 200 }}
+          >
+            {cycles.map((c) => (
+              <MenuItem key={c} value={c}>
+                {monthLabel(c)}
+              </MenuItem>
             ))}
-            {!loading && !rows.length && (
+          </TextField>
+          {!loading && due && (
+            <Typography variant="body2" sx={{ color: 'text.secondary', flexGrow: 1 }}>
+              Due {formatDate(due)} · {submitted} of {reviewable.length} submitted
+              {late > 0 && ` · ${late} overdue`}
+            </Typography>
+          )}
+          {scope === 'people' && noManager > 0 && (
+            <Chip color="warning" variant="outlined" label={`${noManager} without a manager`} />
+          )}
+        </Stack>
+        {error && (
+          <Alert severity="error" sx={{ mx: 2, mb: 2 }} onClose={() => setError(null)}>
+            {error}
+          </Alert>
+        )}
+        {loading && <LinearProgress />}
+        <TableContainer>
+          <Table>
+            <TableHead>
               <TableRow>
-                <TableCell colSpan={6} sx={{ py: 8, textAlign: 'center', color: 'text.secondary' }}>
-                  {scope === 'team'
-                    ? `None of your reports is due a review for ${monthLabel(month)}.`
-                    : `Nobody is due a review for ${monthLabel(month)}.`}
-                </TableCell>
+                <TableCell>Employee</TableCell>
+                {scope === 'people' && <TableCell>Manager</TableCell>}
+                <TableCell>Review</TableCell>
+                <TableCell>Submitted</TableCell>
+                <TableCell>Acknowledged</TableCell>
+                {scope === 'team' && <TableCell align="right" />}
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Paper>
+            </TableHead>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow
+                  key={r.employee_id}
+                  hover
+                  onClick={scope === 'people' ? () => navigate(`/performance/people/${r.employee_id}`) : undefined}
+                  sx={{ cursor: scope === 'people' ? 'pointer' : undefined, '&:last-child td': { borderBottom: 0 } }}
+                >
+                  <TableCell>
+                    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                      <PersonAvatar name={r.full_name} size={32} />
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                          {r.full_name}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          {r.designation ?? 'No designation'}
+                          {scope === 'team' && noted.has(r.employee_id) && ' · Has private notes'}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  </TableCell>
+                  {scope === 'people' && (
+                    <TableCell>
+                      {r.manager_name ?? <Chip size="small" color="warning" variant="outlined" label="No manager" />}
+                    </TableCell>
+                  )}
+                  <TableCell>{r.manager_id ? <ReviewStateChip state={reviewState(r)} /> : '—'}</TableCell>
+                  <TableCell>{r.submitted_at ? formatDay(r.submitted_at) : '—'}</TableCell>
+                  <TableCell>{r.acknowledged_at ? formatDay(r.acknowledged_at) : '—'}</TableCell>
+                  {scope === 'team' && (
+                    <TableCell align="right">
+                      {r.review_id ? (
+                        <Button size="small" onClick={() => navigate(`/performance/reviews/${r.review_id}`)}>
+                          {r.status === 'draft' ? 'Continue' : 'View'}
+                        </Button>
+                      ) : (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          loading={starting === r.employee_id}
+                          onClick={() => start(r)}
+                        >
+                          Start review
+                        </Button>
+                      )}
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+              {!loading && !rows.length && (
+                <TableRow>
+                  <TableCell colSpan={6} sx={{ py: 8, textAlign: 'center', color: 'text.secondary' }}>
+                    {scope === 'team'
+                      ? `None of your reports is due a review for ${monthLabel(month)}.`
+                      : `Nobody is due a review for ${monthLabel(month)}.`}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+    </Stack>
   )
 }

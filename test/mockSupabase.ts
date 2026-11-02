@@ -90,6 +90,7 @@ function employee(
     app_role,
     login_method: 'google',
     can_claim_reimbursements: false,
+    probation_end_date: null,
     created_at: '2024-01-15T09:00:00Z',
     updated_at: '2024-01-15T09:00:00Z',
   }
@@ -507,6 +508,13 @@ const EXPECTATIONS: Row[] = [
   { id: 'x-standup', designation_id: 'g-dev', title: 'Joins standup' },
 ]
 
+// Last month's first day: the month a 1:1 held today reviews.
+const lastMonth = () => {
+  const d = new Date()
+  const m = new Date(d.getFullYear(), d.getMonth() - 1, 1)
+  return `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}-01`
+}
+
 // The 10th of the month after, as the generated due_date.
 const dueOf = (period: string) => {
   const [y, m] = period.split('-').map(Number)
@@ -590,14 +598,15 @@ const PEER_REVIEW_ANSWERS: Row[] = [
   { id: 'pr-6', assignment_id: 'pa-2', question_id: 'pq-3', rating: 4, comment: null },
 ]
 
-// The seeded questions; Sara gave her Q1 2026 feedback on Amna.
+// The seeded questions; Sara gave her February 2026 feedback on Amna (at the
+// 1:1 in early March).
 const MANAGER_FEEDBACK_QUESTIONS: Row[] = [
   'Gives me clear goals and priorities.', 'Gives me useful, timely feedback.',
   'Is available and supportive when I need help.', 'Recognises my work and treats me fairly.',
   'Supports my growth and career development.',
 ].map((prompt, i) => ({ id: `mq-${i + 1}`, prompt, sort_order: i }))
 const MANAGER_FEEDBACK: Row[] = [
-  { id: 'mf-q1', employee_id: 'e-sara', manager_id: 'e-amna', year: 2026, quarter: 1, due_date: '2026-03-10',
+  { id: 'mf-q1', employee_id: 'e-sara', manager_id: 'e-amna', period: '2026-02-01', due_date: '2026-03-10',
     body: 'Clear priorities every sprint.', created_at: '2026-03-02T09:00:00Z', updated_at: '2026-03-04T09:00:00Z',
     submitted_at: '2026-03-04T09:00:00Z', late: false },
 ]
@@ -1313,7 +1322,7 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     const id = `new-${nextId++}`
     rowsIn('payrolls').push(payroll(id, Number(year), Number(month), 'draft',
       { created_by: authState.bound?.id, created_at: new Date().toISOString() }))
-    for (const e of rowsIn('employees').filter((x) => ['probation', 'active', 'notice_period'].includes(String(x.status)))) {
+    for (const e of rowsIn('employees').filter((x) => ['probation', 'extended_probation', 'active', 'notice_period'].includes(String(x.status)))) {
       rowsIn('payroll_items').push({ id: `new-${nextId++}`, ...insertDefaults('payroll_items', { payroll_id: id, employee_id: e.id }) })
     }
     return id
@@ -1418,7 +1427,7 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     const me = authState.bound
     const hr = me?.app_role === 'hr_admin' || me?.app_role === 'company_admin'
     return rowsIn('employees')
-      .filter((e) => ['probation', 'active', 'notice_period'].includes(String(e.status)) &&
+      .filter((e) => ['probation', 'extended_probation', 'active', 'notice_period'].includes(String(e.status)) &&
         String(e.date_of_joining) <= String(period))
       .map((e) => {
         const managerId = (rowsIn('org_chart_nodes').find((n) => n.employee_id === e.id)?.manager_id ?? null) as string | null
@@ -1472,19 +1481,17 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     return null
   },
 
-  // The caller's form for this quarter, made the first time (in the quarter's
-  // last month, with a manager); the same one after that. Returns its id.
+  // The caller's form for their current 1:1 (last month's), made the first
+  // time; the same one after that. Returns its id.
   manager_feedback_start: () => {
     const me = authState.bound?.id
-    const today = new Date().toISOString().slice(0, 10)
-    const year = Number(today.slice(0, 4))
-    const quarter = Math.floor((Number(today.slice(5, 7)) - 1) / 3) + 1
-    const existing = rowsIn('manager_feedback').find((f) => f.employee_id === me && f.year === year && f.quarter === quarter)
+    const period = lastMonth()
+    const existing = rowsIn('manager_feedback').find((f) => f.employee_id === me && f.period === period)
     if (existing) return existing.id
     const id = `new-${nextId++}`
     rowsIn('manager_feedback').push({
       id, employee_id: me, manager_id: rowsIn('org_chart_nodes').find((n) => n.employee_id === me)?.manager_id ?? null,
-      year, quarter, due_date: `${year}-${String(quarter * 3).padStart(2, '0')}-10`, body: null,
+      period, due_date: dueOf(period), body: null,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(), submitted_at: null, late: false,
     })
     ;[...rowsIn('manager_feedback_questions')].sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
@@ -1499,24 +1506,43 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     return null
   },
 
-  // Who owes feedback that quarter (login status, a manager, joined by the
-  // first of its last month), with their form; never rows about the caller.
-  manager_feedback_due: ({ p_year: year, p_quarter: quarter }) => {
+  // Who owes feedback for that month (whoever is due a review), with their
+  // form; never rows about the caller.
+  manager_feedback_due: ({ p_period: period }) => {
     const me = authState.bound?.id
-    const opens = `${year}-${String(Number(quarter) * 3).padStart(2, '0')}-01`
     return rowsIn('employees')
       .map((e) => {
-        const f = rowsIn('manager_feedback').find((x) => x.employee_id === e.id && x.year === year && x.quarter === quarter)
+        const f = rowsIn('manager_feedback').find((x) => x.employee_id === e.id && x.period === period)
         const managerId = (f?.manager_id ?? rowsIn('org_chart_nodes').find((n) => n.employee_id === e.id)?.manager_id ?? null) as string | null
-        const owes = ['probation', 'active', 'notice_period'].includes(String(e.status)) && !!managerId && String(e.date_of_joining) <= opens
+        const owes = ['probation', 'extended_probation', 'active', 'notice_period'].includes(String(e.status)) && !!managerId && String(e.date_of_joining) <= String(period)
         return (f || owes) && managerId !== me ? {
           employee_id: e.id, full_name: e.full_name, manager_id: managerId, manager_name: managerId ? find('employees', managerId)?.full_name : null,
-          feedback_id: f?.id ?? null, due_date: `${year}-${String(Number(quarter) * 3).padStart(2, '0')}-10`,
+          feedback_id: f?.id ?? null, due_date: dueOf(String(period)),
           submitted_at: f?.submitted_at ?? null, late: f?.late ?? null,
         } : null
       })
       .filter(Boolean)
       .sort((a, b) => String(a!.full_name).localeCompare(String(b!.full_name)))
+  },
+
+  // The caller's current 1:1 (last month's) if they are due one: the state of
+  // the review of them and of their feedback on the manager.
+  my_one_on_one: () => {
+    const me = authState.bound
+    if (!me) return null
+    const period = lastMonth()
+    const r = rowsIn('performance_reviews').find((x) => x.employee_id === me.id && x.period === period)
+    const f = rowsIn('manager_feedback').find((x) => x.employee_id === me.id && x.period === period)
+    const managerId = (f?.manager_id ?? rowsIn('org_chart_nodes').find((n) => n.employee_id === me.id)?.manager_id ?? null) as string | null
+    const e = find('employees', me.id)
+    const due = ['probation', 'extended_probation', 'active', 'notice_period'].includes(String(e?.status)) && !!managerId &&
+      String(e?.date_of_joining) <= period
+    if (!r && !f && !due) return null
+    return {
+      period, due_date: dueOf(period), manager_id: managerId, manager_name: managerId ? find('employees', managerId)?.full_name : null,
+      review_id: r?.id ?? null, review_status: r?.status ?? null, review_submitted_at: r?.submitted_at ?? null,
+      feedback_id: f?.id ?? null, feedback_submitted_at: f?.submitted_at ?? null,
+    }
   },
 
   // A draft with the latest earlier cycle's questions, or the starter ones.

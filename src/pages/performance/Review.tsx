@@ -21,7 +21,9 @@ import { supabase } from '../../lib/supabase'
 import { formatDate, formatDay } from '../../lib/constants'
 import {
   REVIEW_WITH_LINES,
+  dueCountdown,
   formatScore,
+  longDate,
   goalPlan,
   goalQuarterOf,
   monthLabel,
@@ -244,6 +246,20 @@ export default function Review() {
               : own
                 ? 'Read it through, then acknowledge it below.'
                 : 'Not yet acknowledged.'}
+          </Alert>
+        )}
+        {editable && (
+          <Alert
+            severity={dueCountdown(draft.due_date).overdue ? 'error' : dueCountdown(draft.due_date).days <= 3 ? 'warning' : 'info'}
+            variant="filled"
+            aria-label="Due date"
+          >
+            <Typography variant="subtitle1" component="p" sx={{ fontWeight: 600 }}>
+              Due {longDate(draft.due_date)} · {dueCountdown(draft.due_date).label}
+            </Typography>
+            <Typography variant="body2">
+              Fill it in at your 1:1 with {person?.full_name ?? 'them'}, then submit it.
+            </Typography>
           </Alert>
         )}
         {draft.status === 'draft' && !editable && (
