@@ -4,6 +4,7 @@ import {
   Box,
   Chip,
   Grid,
+  LinearProgress,
   List,
   ListItemButton,
   ListItemText,
@@ -28,10 +29,12 @@ import {
   expectationsMet,
   formatScore,
   goalQuarterOf,
+  lineKey,
   monthLabel,
   overallScore,
   quarterLabel,
   reviewState,
+  scoreSummary,
   shortMonthLabel,
   type ReviewState,
   type ReviewWithLines,
@@ -217,9 +220,8 @@ export function PerformanceReport({ reviews }: { reviews: ReviewWithLines[] }) {
     return s == null ? [] : [{ month: r.period, label: shortMonthLabel(r.period), score: s }]
   })
 
-  // Every KPI and expectation in these months, keyed by what it was copied
-  // from (or its name, if that is gone), in the latest review's order first.
-  const keyOf = (id: string | null, name: string) => id ?? `name:${name}`
+  // Every KPI and expectation in these months, in the latest review's order first.
+  const keyOf = lineKey
   const kpiRows = new Map<string, string>()
   const expectationRows = new Map<string, string>()
   for (const r of [...months].reverse()) {
@@ -339,6 +341,115 @@ export function PerformanceReport({ reviews }: { reviews: ReviewWithLines[] }) {
           </Table>
         </TableContainer>
       </Paper>
+    </Stack>
+  )
+}
+
+// One KPI's or expectation's average, with a bar out of the most it can be.
+function AverageRow({ name, value, percent, detail }: { name: string; value: string; percent: number; detail: string }) {
+  return (
+    <Box sx={{ px: 2, py: 1.25 }}>
+      <Stack direction="row" spacing={2} sx={{ alignItems: 'baseline', mb: 0.75 }}>
+        <Typography variant="body2" sx={{ flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
+          {name}
+        </Typography>
+        <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+          {value}
+        </Typography>
+      </Stack>
+      <LinearProgress variant="determinate" value={percent} aria-label={`${name}: ${value}, ${detail}`} />
+      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+        {detail}
+      </Typography>
+    </Box>
+  )
+}
+
+const reviewCount = (n: number) => (n === 1 ? '1 review' : `${n} reviews`)
+
+/**
+ * Scores across every submitted review: the performance score, the KPI and
+ * expectation scores, then each KPI's average rating and each expectation's
+ * share met.
+ */
+export function ScoreSummary({ reviews }: { reviews: ReviewWithLines[] }) {
+  const s = scoreSummary(reviews)
+  if (!s.reviews) {
+    return (
+      <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
+        <Typography variant="body2">No scores yet. They show here once your manager submits a monthly review.</Typography>
+      </Paper>
+    )
+  }
+  return (
+    <Stack spacing={2}>
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, sm: 4 }}>
+          <StatTile
+            label="Performance score"
+            value={s.performance == null ? '—' : `${s.performance}%`}
+            detail="Average KPI score out of 5, as a percentage"
+          />
+        </Grid>
+        <Grid size={{ xs: 12, sm: 4 }}>
+          <StatTile
+            label="KPI score"
+            value={`${formatScore(s.kpiScore)} / 5`}
+            detail={`Average over ${reviewCount(s.reviews)}`}
+          />
+        </Grid>
+        <Grid size={{ xs: 12, sm: 4 }}>
+          <StatTile
+            label="Expectation score"
+            value={s.expectationScore == null ? '—' : `${s.expectationScore}%`}
+            detail={`Expectations met over ${reviewCount(s.reviews)}`}
+          />
+        </Grid>
+      </Grid>
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Paper variant="outlined" component="section" aria-label="KPIs">
+            <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, px: 2, pt: 1.5 }}>
+              KPIs
+            </Typography>
+            {s.kpis.map((k) => (
+              <AverageRow
+                key={k.key}
+                name={k.name}
+                value={`${formatScore(k.average)} / 5`}
+                percent={(k.average / 5) * 100}
+                detail={`Average of ${reviewCount(k.count)}`}
+              />
+            ))}
+            {!s.kpis.length && (
+              <Typography variant="body2" sx={{ px: 2, py: 1.5, color: 'text.secondary' }}>
+                No KPIs rated.
+              </Typography>
+            )}
+          </Paper>
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Paper variant="outlined" component="section" aria-label="Expectations">
+            <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, px: 2, pt: 1.5 }}>
+              Expectations
+            </Typography>
+            {s.expectations.map((x) => (
+              <AverageRow
+                key={x.key}
+                name={x.name}
+                value={`${Math.round(x.average * 100)}%`}
+                percent={x.average * 100}
+                detail={`Met in ${Math.round(x.average * x.count)} of ${reviewCount(x.count)}`}
+              />
+            ))}
+            {!s.expectations.length && (
+              <Typography variant="body2" sx={{ px: 2, py: 1.5, color: 'text.secondary' }}>
+                No expectations marked.
+              </Typography>
+            )}
+          </Paper>
+        </Grid>
+      </Grid>
     </Stack>
   )
 }

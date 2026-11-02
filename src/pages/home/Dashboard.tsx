@@ -5,13 +5,14 @@ import { useAuth } from '../../auth/AuthProvider'
 import { supabase } from '../../lib/supabase'
 import { formatDate, formatDateRange, formatDays } from '../../lib/constants'
 import { HOLIDAY_COLUMNS, LEAVE_WITH_TYPE, thisYear, todayIso, type LeaveWithType } from '../../lib/leaves'
-import { currentCycle, monthLabel } from '../../lib/performance'
+import { currentCycle, monthLabel, type ReviewWithLines } from '../../lib/performance'
 import { ASSIGNMENT_WITH_CYCLE, cycleLabel, quarterOf, type AssignmentWithCycle } from '../../lib/peerReviews'
 import { OFFBOARDING_LIST, signOffOf, type OffboardingListRow } from '../../lib/offboarding'
 import type { Announcement, Holiday, LeaveBalance, OrgNode, PerformanceReview, ReviewDue, OneOnOne } from '../../lib/types'
 import { PageHeader } from '../../components/common'
 import { BalanceCards, HolidayList, LeaveStatusChip } from '../../components/Leaves'
 import { CompanyValues } from '../../components/CompanyValues'
+import { ScoreSummary } from '../../components/Performance'
 import { AnnouncementCard, AnnouncementsDrawer, AnnouncementsIcon } from '../../components/Announcements'
 
 // How many upcoming leaves the dashboard lists; the rest are on My leaves.
@@ -197,6 +198,41 @@ function PerformanceNotices() {
   )
 }
 
+// The person's scores across every submitted review of them (RLS: their own
+// reviews only once submitted).
+const MY_SCORES =
+  'period, status, kpis:performance_review_kpis(kpi_id, name, weight, rating, sort_order), ' +
+  'expectations:performance_review_expectations(expectation_id, title, met, sort_order)'
+
+function MyPerformance() {
+  const { employee } = useAuth()
+  const me = employee!.id
+  const [reviews, setReviews] = useState<ReviewWithLines[] | null>(null)
+
+  useEffect(() => {
+    supabase
+      .from('performance_reviews')
+      .select(MY_SCORES)
+      .eq('employee_id', me)
+      .eq('status', 'submitted')
+      .then(({ data, error }) => setReviews(error ? null : ((data ?? []) as unknown as ReviewWithLines[])))
+  }, [me])
+
+  if (!reviews) return null
+  return (
+    <Section
+      title="My performance"
+      action={
+        <Button component={Link} to="/performance" size="small">
+          Performance
+        </Button>
+      }
+    >
+      <ScoreSummary reviews={reviews} />
+    </Section>
+  )
+}
+
 // Company admins: appraisals waiting for their approval (RLS leaves out
 // their own).
 function AppraisalNotice() {
@@ -374,6 +410,8 @@ export default function Dashboard() {
         </Section>
       )}
       <AnnouncementsDrawer open={allAnnouncements} onClose={() => setAllAnnouncements(false)} />
+
+      {!loading && !error && <MyPerformance />}
 
       {!loading && !error && (
         <Section

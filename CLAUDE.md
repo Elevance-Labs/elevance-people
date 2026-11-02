@@ -140,7 +140,9 @@ behaviour).
 - `/dashboard` — everyone; the landing page. Performance reminders (reviews
   to submit, own reviews and HR feedback to acknowledge, peer reviews to
   write, feedback on one's manager at the current 1:1, HR: a quarter with no
-  peer reviews), pinned announcements (body
+  peer reviews), own scores (*My performance*: performance, KPI and
+  expectation scores, each KPI's and expectation's average over own submitted
+  reviews), pinned announcements (body
   only; *View all* opens the drawer in `components/Announcements.tsx` with the
   last 4 months'), offboarding reminders (HR and managers: to sign off; managers: a
   report leaving), appraisals to approve (company admins), own leave balance and upcoming leave, upcoming holidays, then the company values
@@ -272,7 +274,7 @@ behaviour).
 - `performance.ts` — review select with its lines, months and quarters,
   client mirrors of the goal rule (`review_goal_quarter`, what a draft rates
   and sets), the submit checks and the due date, the weighted overall score,
-  review states and error messages.
+  the score summary across reviews (dashboard), review states and error messages.
 - `peerReviews.ts` — peer review selects, quarters and labels, a form's
   state (to do, overdue, submitted, missed), per-question averages, the
   question and response limits (mirrors of the SQL), error messages.
@@ -306,7 +308,7 @@ behaviour).
   the year's holidays for its count).
 - `components/Performance.tsx` — review state chip, the performance report
   (stat tiles, overall-score chart, month-by-month table) and review list;
-  shared by the Me tab and the person page.
+  shared by the Me tab and the person page; the score summary (dashboard).
 - `components/PrivateNotes.tsx` — a manager's one private note about a report
   (a text block, saved on blur or Save); on the review form and the person
   page, for the current manager only.

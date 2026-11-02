@@ -120,6 +120,54 @@ export function expectationsMet(expectations: Pick<ReviewExpectation, 'met'>[]) 
 
 export const formatScore = (score: number | null) => (score == null ? '—' : score.toFixed(1))
 
+// A KPI or expectation across reviews: what it was copied from, or its name
+// if that is gone.
+export const lineKey = (id: string | null, name: string) => id ?? `name:${name}`
+
+export type LineAverage = { key: string; name: string; average: number; count: number }
+
+/**
+ * Submitted reviews summed up: each KPI's average rating out of 5 and each
+ * expectation's share met (0–1), in the newest review's order first; the KPI
+ * score (the average of each review's overall score), the performance score
+ * (that as a percentage of 5) and the expectation score (percent of all
+ * expectations met).
+ */
+export function scoreSummary(reviews: Pick<ReviewWithLines, 'period' | 'status' | 'kpis' | 'expectations'>[]) {
+  const submitted = reviews
+    .filter((r) => r.status === 'submitted')
+    .sort((a, b) => b.period.localeCompare(a.period))
+  const kpis = new Map<string, { name: string; sum: number; count: number }>()
+  const expectations = new Map<string, { name: string; sum: number; count: number }>()
+  const add = (map: typeof kpis, key: string, name: string, value: number) => {
+    const row = map.get(key) ?? { name, sum: 0, count: 0 }
+    map.set(key, { name: row.name, sum: row.sum + value, count: row.count + 1 })
+  }
+  for (const r of submitted) {
+    for (const k of [...r.kpis].sort((a, b) => a.sort_order - b.sort_order))
+      if (k.rating != null) add(kpis, lineKey(k.kpi_id, k.name), k.name, k.rating)
+    for (const x of [...r.expectations].sort((a, b) => a.sort_order - b.sort_order))
+      if (x.met != null) add(expectations, lineKey(x.expectation_id, x.title), x.title, x.met ? 1 : 0)
+  }
+  const averages = (map: typeof kpis): LineAverage[] =>
+    [...map].map(([key, { name, sum, count }]) => ({ key, name, average: sum / count, count }))
+
+  const overall = submitted.map((r) => overallScore(r.kpis)).filter((s): s is number => s != null)
+  const kpiScore = overall.length ? overall.reduce((a, b) => a + b, 0) / overall.length : null
+  const marked = [...expectations.values()]
+  const expectationsMarked = marked.reduce((n, x) => n + x.count, 0)
+  return {
+    reviews: submitted.length,
+    kpis: averages(kpis),
+    expectations: averages(expectations),
+    kpiScore,
+    performance: kpiScore == null ? null : Math.round((kpiScore / 5) * 100),
+    expectationScore: expectationsMarked
+      ? Math.round((marked.reduce((n, x) => n + x.sum, 0) / expectationsMarked) * 100)
+      : null,
+  }
+}
+
 /**
  * Mirrors review_submit's checks, in its order: what still stops a draft from
  * being submitted. Empty when it can go.

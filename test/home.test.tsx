@@ -78,6 +78,39 @@ check('with nothing pinned, the section says so and still offers them all',
   section('Announcements')?.textContent)
 check('with no leave coming up, it says so', text().includes('No upcoming leave.'))
 
+// ---------------- my performance ----------------
+// Sara's March (4 and 3, both met) and April (3 and 2, standup not met).
+const perf = section('My performance')
+const reviewRead = captured.selects.find((s) => s.table === 'performance_reviews' && s.columns.includes('kpis:'))
+check('my scores come from my own submitted reviews',
+  JSON.stringify(reviewRead?.filters) === JSON.stringify([['employee_id', 'eq', 'e-sara'], ['status', 'eq', 'submitted']]),
+  JSON.stringify(reviewRead))
+const tile = (label: string) =>
+  [...(perf?.querySelectorAll('.MuiPaper-root') ?? [])].find((p) => p.firstElementChild?.textContent === label)?.textContent
+check('the KPI score is the average of each month\'s weighted overall (3.4, 2.4)',
+  tile('KPI score')?.includes('2.9 / 5') && tile('KPI score')?.includes('Average over 2 reviews'), tile('KPI score'))
+check('the performance score is that out of 5 as a percentage', tile('Performance score')?.includes('58%'),
+  tile('Performance score'))
+check('the expectation score is the share of all expectations met (3 of 4)',
+  tile('Expectation score')?.includes('75%'), tile('Expectation score'))
+const kpiList = perf?.querySelector('[aria-label="KPIs"]')?.textContent ?? ''
+check('each KPI shows its average rating across reviews',
+  kpiList.includes('Code review turnaround3.5 / 5') && kpiList.includes('Escaped defects2.5 / 5') &&
+  kpiList.indexOf('Code review') < kpiList.indexOf('Escaped'), kpiList)
+const expList = perf?.querySelector('[aria-label="Expectations"]')?.textContent ?? ''
+check('each expectation shows how often it was met',
+  expList.includes('Joins standup50%') && expList.includes('Met in 1 of 2 reviews') &&
+  expList.includes('Updates tickets daily100%') && expList.indexOf('Joins standup') < expList.indexOf('Updates tickets'),
+  expList)
+check('…and the section links to Performance', button('Performance', perf!)?.getAttribute('href')?.endsWith('/performance'))
+
+reset()
+signInAs(PEOPLE.member)
+table('performance_reviews').forEach((r) => (r.status = 'draft'))
+await mountApp('/dashboard')
+check('a draft review gives no score', section('My performance')?.textContent?.includes('No scores yet.'),
+  section('My performance')?.textContent)
+
 reset()
 signInAs(PEOPLE.member)
 table('announcements')[0].body = '<p>Hi</p><script>alert(1)</script><img src=x onerror="alert(1)">'
