@@ -50,7 +50,8 @@ create type public.reimbursement_status as enum
 -- ---------------------------------------------------------------------------
 -- Company configuration: departments, designations (each in a department),
 -- and KPIs and expectations (each for a designation). Every logged-in
--- employee reads them; only company admins write.
+-- employee reads them; company admins write departments and designations,
+-- HR (HR admins and company admins) KPIs and expectations.
 -- ---------------------------------------------------------------------------
 create table public.departments (
   id          uuid primary key default gen_random_uuid(),
@@ -4145,20 +4146,20 @@ create policy designations_delete on public.designations for delete to authentic
 create policy kpis_select on public.kpis for select to authenticated
   using ((select public.current_employee_id()) is not null);
 create policy kpis_insert on public.kpis for insert to authenticated
-  with check ((select public.is_company_admin()));
+  with check ((select public.is_hr()));
 create policy kpis_update on public.kpis for update to authenticated
-  using ((select public.is_company_admin())) with check ((select public.is_company_admin()));
+  using ((select public.is_hr())) with check ((select public.is_hr()));
 create policy kpis_delete on public.kpis for delete to authenticated
-  using ((select public.is_company_admin()));
+  using ((select public.is_hr()));
 
 create policy expectations_select on public.expectations for select to authenticated
   using ((select public.current_employee_id()) is not null);
 create policy expectations_insert on public.expectations for insert to authenticated
-  with check ((select public.is_company_admin()));
+  with check ((select public.is_hr()));
 create policy expectations_update on public.expectations for update to authenticated
-  using ((select public.is_company_admin())) with check ((select public.is_company_admin()));
+  using ((select public.is_hr())) with check ((select public.is_hr()));
 create policy expectations_delete on public.expectations for delete to authenticated
-  using ((select public.is_company_admin()));
+  using ((select public.is_hr()));
 
 -- Leave types: every employee reads, HR writes.
 create policy leave_types_select on public.leave_types for select to authenticated

@@ -146,9 +146,9 @@ const NAV: NavSection[] = [
     items: [
       { to: '/company/departments', label: 'Departments', icon: <ApartmentOutlinedIcon />, companyAdminOnly: true },
       { to: '/company/designations', label: 'Designations', icon: <BadgeOutlinedIcon />, companyAdminOnly: true },
-      { to: '/company/kpis', label: 'KPIs', icon: <InsightsOutlinedIcon />, companyAdminOnly: true },
-      { to: '/company/expectations', label: 'Expectations', icon: <TaskAltOutlinedIcon />, companyAdminOnly: true },
-      // HR sets up leave, holidays and announcements too, so these are open to HR admins.
+      // HR sets up KPIs, expectations, leave, holidays and announcements too, so these are open to HR admins.
+      { to: '/company/kpis', label: 'KPIs', icon: <InsightsOutlinedIcon />, hrOnly: true },
+      { to: '/company/expectations', label: 'Expectations', icon: <TaskAltOutlinedIcon />, hrOnly: true },
       { to: '/company/leaves', label: 'Leaves', icon: <EventNoteOutlinedIcon />, hrOnly: true },
       { to: '/company/holidays', label: 'Holidays', icon: <CelebrationOutlinedIcon />, hrOnly: true },
       { to: '/company/announcements', label: 'Announcements', icon: <CampaignOutlinedIcon />, hrOnly: true },

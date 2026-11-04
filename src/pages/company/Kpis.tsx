@@ -24,6 +24,7 @@ import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../auth/AuthProvider'
 import {
   DESIGNATION_WITH_DEPARTMENT,
   byDepartmentThenTitle,
@@ -38,6 +39,7 @@ import type { Kpi } from '../../lib/types'
 const EMPTY = { designation_id: '', name: '', description: '', target: '', weight: '' }
 
 export default function Kpis() {
+  const { isCompanyAdmin } = useAuth()
   const [params, setParams] = useSearchParams()
   const designationFilter = params.get('designation') ?? ''
   const [rows, setRows] = useState<Kpi[]>([])
@@ -152,10 +154,16 @@ export default function Kpis() {
       {!loading && !designations.length && (
         <Alert severity="info" variant="outlined" sx={{ mb: 2 }}>
           KPIs belong to a designation.{' '}
-          <MuiLink component={Link} to="/company/designations">
-            Add a designation
-          </MuiLink>{' '}
-          first.
+          {isCompanyAdmin ? (
+            <>
+              <MuiLink component={Link} to="/company/designations">
+                Add a designation
+              </MuiLink>{' '}
+              first.
+            </>
+          ) : (
+            'A company admin adds designations.'
+          )}
         </Alert>
       )}
       {error && (

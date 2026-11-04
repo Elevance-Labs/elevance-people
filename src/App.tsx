@@ -138,6 +138,8 @@ function SignedIn() {
           <>
             <Route path="/company/leaves" element={<CompanyLeaves />} />
             <Route path="/company/holidays" element={<Holidays />} />
+            <Route path="/company/kpis" element={<Kpis />} />
+            <Route path="/company/expectations" element={<Expectations />} />
             <Route
               path="/company/announcements"
               element={<Suspense fallback={spinner}><Announcements /></Suspense>}
@@ -148,8 +150,6 @@ function SignedIn() {
           <>
             <Route path="/company/departments" element={<Departments />} />
             <Route path="/company/designations" element={<Designations />} />
-            <Route path="/company/kpis" element={<Kpis />} />
-            <Route path="/company/expectations" element={<Expectations />} />
             <Route path="/company/branding" element={<Branding />} />
             <Route path="/configuration/onboarding" element={<Checklist key="onboarding" kind="onboarding" />} />
             <Route path="/configuration/offboarding" element={<Checklist key="offboarding" kind="offboarding" />} />

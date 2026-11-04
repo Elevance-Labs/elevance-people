@@ -198,10 +198,10 @@ reset()
 signInAs(PEOPLE.hr)
 await mountApp('/')
 check('HR lands on the dashboard', location.pathname === '/dashboard', location.pathname)
-check('HR is offered their own reimbursements, people, leave, HR, payroll, reimbursements and equipment pages, only Leaves, Holidays and Announcements under company settings, and only Vendors under configuration',
+check('HR is offered their own reimbursements, people, leave, HR, payroll, reimbursements and equipment pages, only KPIs, Expectations, Leaves, Holidays and Announcements under company settings, and only Vendors under configuration',
   navLabels().join() ===
     'Dashboard,Handbook,Resources,Profile,My leaves,My reimbursements,Employees,Org chart,Performance,Appraisals,Leave requests,Job openings,' +
-      'Applications,Onboarding,Offboarding,Payroll,Reimbursements,Equipment,Leaves,Holidays,Announcements,Vendors',
+      'Applications,Onboarding,Offboarding,Payroll,Reimbursements,Equipment,KPIs,Expectations,Leaves,Holidays,Announcements,Vendors',
   navLabels().join())
 
 reset()
@@ -213,6 +213,22 @@ reset()
 signInAs(PEOPLE.hr)
 await mountApp('/company/announcements')
 check('HR reaches announcements', await waitFor(() => text().includes('Add announcement')), location.pathname)
+
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/company/kpis')
+check('HR reaches KPIs', location.pathname === '/company/kpis' && text().includes('Add KPI'), location.pathname)
+
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/company/expectations')
+check('HR reaches expectations', location.pathname === '/company/expectations' && text().includes('Add expectation'),
+  location.pathname)
+
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/company/designations')
+check('HR sent to designations ends up on the dashboard', location.pathname === '/dashboard', location.pathname)
 
 reset()
 signInAs(PEOPLE.hr)

@@ -111,7 +111,7 @@ behaviour).
 |---|---|
 | `src/pages/` | One file per route. Fetches its own data, owns page state. |
 | `src/pages/home/` | Dashboard, handbook, resources, profile — everyone. |
-| `src/pages/company/` | Company settings pages (company admins; the Leaves, Holidays and Announcements pages also HR). |
+| `src/pages/company/` | Company settings pages (company admins; the KPIs, Expectations, Leaves, Holidays and Announcements pages also HR). |
 | `src/pages/leaves/` | Leaves pages: own leaves, requests to approve. |
 | `src/pages/hiring/` | Job openings list and form (HR); applications board and its dialog. |
 | `src/pages/hr/` | Human Resources pages: onboarding and offboarding lists and details (HR, and managers). |
@@ -213,13 +213,14 @@ behaviour).
   invoice and photo, delete; assign / reassign / unassign, history.
 - `/configuration/vendors` — HR, finance admins, company admins: add, edit;
   delete is company-admin only.
-- `/company/departments`, `/company/designations`, `/company/kpis`,
-  `/company/expectations`, `/company/branding`, `/configuration/onboarding`,
-  `/configuration/offboarding` —
+- `/company/departments`, `/company/designations`, `/company/branding`,
+  `/configuration/onboarding`, `/configuration/offboarding` —
   company admins only. The checklists filter by department in `?department=`
   (its sections and everyone's).
 - `/company/leaves` — HR: tabs *Types* (default yearly quota per type) and
   *Quotas* (per-person overrides for a year); tab kept in `?tab=`.
+- `/company/kpis`, `/company/expectations` — HR: a designation's KPIs
+  (with weights) and expectations (`?designation=`).
 - `/company/holidays` — HR: a year's holidays (year picker); add, edit, delete.
 - `/company/announcements` — HR: write, pin, unpin, delete; lazy-loaded (rich
   text editor).
@@ -372,7 +373,8 @@ Full detail in `supabase/schema.sql`.
   moves via `leave_decide` (approve/reject) and `leave_cancel`.
   `leave_balances` returns quota/approved/pending per type for one person-year.
 - `departments` → `designations` → `kpis` and `expectations` — company
-  config. A department has a `business_function` enum (production, growth,
+  config; everyone reads, company admins write departments and designations,
+  HR KPIs and expectations. A department has a `business_function` enum (production, growth,
   operations; null only for departments made before it). Names unique case-insensitively within their parent. Deleting cascades down the config
   but is refused while employees or job openings are linked.
 - `job_openings` (+ `job_opening_interviewers`, `manager_id`) — HR manages;
