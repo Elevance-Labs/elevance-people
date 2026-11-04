@@ -59,9 +59,23 @@ check('HR\'s save leaves the role out, so the database guard is not tripped',
 check('…and the company email too', !!hrSave && !('company_email' in hrSave.values))
 check('…sends the edit trimmed', hrSave?.values.phone === '0300 1234567')
 check('…turns empty fields into nulls', hrSave?.values.cnic_number === null && hrSave?.values.bank === null)
+check('…with the employee number as a number', hrSave?.values.employee_number === 3, JSON.stringify(hrSave?.values))
 check('…and updates only that record',
   JSON.stringify(hrSave?.filters) === JSON.stringify([['id', 'eq', 'e-sara']]), JSON.stringify(hrSave?.filters))
 check('saving says so', text().includes('Changes saved'))
+
+// Backfilled records carry their real numbers: HR changes them, unique.
+check('HR can change the employee number', valueOf('Employee number') === '3' &&
+  field('Employee number')?.querySelector('input')?.disabled === false, valueOf('Employee number'))
+await type('Employee number', '17')
+await click(button('Save changes'))
+check('…and the new number is sent',
+  captured.updates.filter((u) => u.table === 'employees').at(-1)?.values.employee_number === 17)
+check('…and shown in the header', text().includes('#0017'))
+await type('Employee number', '5')
+failNext('employees.update', { code: '23505', message: 'duplicate key value violates unique constraint "employees_employee_number_key"' })
+await click(button('Save changes'))
+check('a number already taken is explained', text().includes('Another employee already has number #0005.'))
 
 // A designation belongs to one department: changing department clears it.
 await choose('Department', 'People Ops')
@@ -87,9 +101,21 @@ check('creating sends the record trimmed', created?.full_name === 'Zara Ali' && 
   JSON.stringify(created))
 check('HR creating sends no role', !!created && !('app_role' in created), keys(created))
 check('…nor a sign-in method, so it is Google', !!created && !('login_method' in created), keys(created))
-check('…and never the login or the number', !!created && !('user_id' in created) && !('employee_number' in created))
+check('…and never the login', !!created && !('user_id' in created))
+check('a blank number is left out, so the database gives the next one', !!created && !('employee_number' in created), keys(created))
 check('after creating, the new record opens', await waitFor(() => location.pathname.startsWith('/employees/new-')),
   location.pathname)
+
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/employees/new')
+await type('Full name', 'Zara Ali')
+await type('Company email', 'zara@elevancelabs.com')
+await type('Date of joining', '2026-07-01')
+await type('Employee number', '42')
+await click(button('Create employee'))
+check('a number typed in on a new record is sent',
+  captured.inserts.find((i) => i.table === 'employees')?.rows[0]?.employee_number === 42)
 
 reset()
 signInAs(PEOPLE.hr)

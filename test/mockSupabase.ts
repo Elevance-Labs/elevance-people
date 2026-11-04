@@ -827,6 +827,9 @@ function insertDefaults(table: Table, row: Row): Row {
       rejection_reason: null, withdrawn_at: null, transaction_date: null, transaction_reference: null,
       transaction_proof_path: null, ...row, created_by: authState.bound?.id,
     }
+  // employees_guard: no number given, the next after the highest in use.
+  if (table === 'employees')
+    return { employee_number: Math.max(0, ...rowsIn(table).map((e) => Number(e.employee_number))) + 1, ...row }
   // equipment_guard stamps the creator; nobody has it yet.
   if (table === 'equipment')
     return { assigned_to: null, assigned_on: null, created_by: authState.bound?.id, updated_at: new Date().toISOString(), ...row }

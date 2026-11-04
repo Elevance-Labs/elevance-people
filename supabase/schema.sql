@@ -122,8 +122,8 @@ create unique index expectations_title_key on public.expectations (designation_i
 -- migrated database (department_id / designation_id were added last).
 create table public.employees (
   id                 uuid primary key default gen_random_uuid(),
-  -- From a sequence: never repeats, but a failed insert can skip a number.
-  employee_number    integer generated always as identity unique,
+  -- Set by HR (unique); left out, the next after the highest (employees_guard).
+  employee_number    integer not null unique check (employee_number > 0),
   user_id            uuid unique references auth.users (id) on delete set null,
   full_name          text not null check (length(trim(full_name)) > 0),
   company_email      text not null unique,
@@ -1234,6 +1234,14 @@ begin
         raise exception 'Only a company admin can change how someone signs in.' using errcode = '42501';
       end if;
     end if;
+  end if;
+
+  -- No number given: the next after the highest in use. The lock keeps two
+  -- inserts at once from picking the same one (the unique constraint would
+  -- refuse the second anyway).
+  if tg_op = 'INSERT' and new.employee_number is null then
+    perform pg_advisory_xact_lock(hashtext('public.employees.employee_number'));
+    select coalesce(max(e.employee_number), 0) + 1 into new.employee_number from public.employees e;
   end if;
 
   if tg_op = 'UPDATE' then
@@ -3782,12 +3790,12 @@ revoke all on public.employees, public.employee_documents, public.org_chart_node
   from anon, authenticated;
 
 grant select, delete on public.employees to authenticated;
--- user_id and employee_number are deliberately not writable by clients.
-grant insert (full_name, company_email, date_of_joining, date_of_separation, personal_email,
+-- user_id is deliberately not writable by clients.
+grant insert (employee_number, full_name, company_email, date_of_joining, date_of_separation, personal_email,
               phone, cnic_number, cnic_expiry, dob, department_id, designation_id, bank, iban,
               emergency_contact, employment_type, status, app_role, login_method,
               probation_end_date),
-      update (full_name, company_email, date_of_joining, date_of_separation, personal_email,
+      update (employee_number, full_name, company_email, date_of_joining, date_of_separation, personal_email,
               phone, cnic_number, cnic_expiry, dob, department_id, designation_id, bank, iban,
               emergency_contact, employment_type, status, app_role, login_method,
               can_claim_reimbursements, probation_end_date)

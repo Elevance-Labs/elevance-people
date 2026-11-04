@@ -35,6 +35,7 @@ import { PASSWORD_MIN_LENGTH, generatePassword, setEmployeePassword } from '../l
 import type { Department, Designation, Employee } from '../lib/types'
 
 const EMPTY = {
+  employee_number: '',
   full_name: '',
   company_email: '',
   date_of_joining: '',
@@ -60,19 +61,25 @@ type FieldName = keyof FormState
 
 function toForm(e: Employee): FormState {
   const form = { ...EMPTY }
-  for (const key of Object.keys(EMPTY) as FieldName[]) form[key] = e[key] ?? ''
+  for (const key of Object.keys(EMPTY) as FieldName[]) form[key] = String(e[key] ?? '')
   return form
 }
 
 function toPayload(form: FormState) {
-  const payload: Record<string, string | null> = {}
+  const payload: Record<string, string | number | null> = {}
   for (const [key, value] of Object.entries(form)) payload[key] = value.trim() || null
   payload.company_email = form.company_email.trim().toLowerCase()
+  // Left blank on a new record, the database gives the next number.
+  if (form.employee_number.trim()) payload.employee_number = Number(form.employee_number)
+  else delete payload.employee_number
   return payload
 }
 
 function friendlyError(error: { code?: string; message: string }, form: FormState) {
+  if (error.code === '23505' && error.message.includes('employee_number'))
+    return `Another employee already has number ${formatEmployeeNumber(Number(form.employee_number))}.`
   if (error.code === '23505') return 'An employee with this company email already exists.'
+  if (error.message.includes('employees_employee_number_check')) return 'The employee number must be 1 or more.'
   if (error.code === '23514' && error.message.includes('company_email'))
     return form.login_method === 'password'
       ? `A password login needs an address outside @${COMPANY_DOMAIN}.`
@@ -308,6 +315,16 @@ export default function EmployeeForm() {
               <Section title="Employment" description="Role, status and access to Elevance People.">
                 <Cell>
                   <TextField {...field('full_name', 'Full name', { required: true })} />
+                </Cell>
+                <Cell>
+                  <TextField
+                    {...field('employee_number', 'Employee number', {
+                      type: 'number',
+                      required: !!id,
+                      helperText: id ? 'Must be unique' : 'Leave blank for the next number',
+                      slotProps: { htmlInput: { min: 1, step: 1 } },
+                    })}
+                  />
                 </Cell>
                 <Cell>
                   <TextField

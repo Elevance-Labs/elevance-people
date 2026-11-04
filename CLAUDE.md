@@ -341,8 +341,9 @@ Full detail in `supabase/schema.sql`.
   (`can_manage_operations`). A finance admin is otherwise a member.
   Only a company admin may assign or change a role, change a company
   email, or set or change the sign-in method (trigger).
-- `employees` — the person and their login. `employee_number` from a sequence,
-  `user_id` set only by `bind_employee`; neither is client-writable.
+- `employees` — the person and their login. `employee_number` unique, set
+  by HR (blank on insert: highest plus one, by `employees_guard`);
+  `user_id` set only by `bind_employee`, not client-writable.
   `login_method` (`google`, the default: company domain only; `password`:
   an outside address only, check constraint). Statuses
   `probation` / `extended_probation` / `active` / `notice_period` may log in (`is_login_status`).
