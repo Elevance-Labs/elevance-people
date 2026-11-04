@@ -30,7 +30,9 @@ import {
   periodLabel,
   type PayslipLine,
 } from '../../lib/payroll'
-import { payslipPdf, type PayslipPerson } from '../../lib/payslip'
+import { payslipPdf, type PayslipCompany, type PayslipPerson } from '../../lib/payslip'
+import { COMPANY_DETAIL_COLUMNS, EMPTY_COMPANY_DETAILS } from '../../lib/branding'
+import { DEFAULT_PRIMARY } from '../../theme'
 import type { Payslip } from '../../lib/types'
 
 function Lines({ title, lines, total }: { title: string; lines: PayslipLine[]; total: PayslipLine }) {
@@ -82,7 +84,18 @@ export default function Payslips({ person }: { person: PayslipPerson }) {
     setDownloading(slip.payroll_id)
     setError(null)
     try {
-      downloadFile(payslipFileName(slip), await payslipPdf(slip, person))
+      // The logo and company details, read fresh. Without them the payslip
+      // still goes out, with the default name and no footer.
+      const { data } = await supabase
+        .from('branding')
+        .select(`logo_path, primary_color, ${COMPANY_DETAIL_COLUMNS}`)
+        .maybeSingle()
+      const company: PayslipCompany = (data as PayslipCompany | null) ?? {
+        logo_path: null,
+        primary_color: DEFAULT_PRIMARY,
+        ...EMPTY_COMPANY_DETAILS,
+      }
+      downloadFile(payslipFileName(slip), await payslipPdf(slip, person, company))
     } catch {
       setError('The payslip PDF could not be made. Try again.')
     }

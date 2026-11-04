@@ -38,7 +38,7 @@ await mountApp('/finance/payroll')
 const listRows = () => [...document.querySelectorAll('tbody tr')].map((r) => r.textContent ?? '')
 check('payrolls are listed newest first, with status, head count and net payable',
   listRows()[0].includes('May 2026') && listRows()[0].includes('Draft') && listRows()[0].includes('3') &&
-    listRows()[0].includes('586,500') && listRows()[1].includes('April 2026') && listRows()[1].includes('Disbursed'),
+    listRows()[0].includes('590,500') && listRows()[1].includes('April 2026') && listRows()[1].includes('Disbursed'),
   listRows().join(' | '))
 check('a new payroll can’t be started while one is open, and the page says why',
   button('New payroll')?.hasAttribute('disabled') &&
@@ -86,10 +86,10 @@ signInAs(PEOPLE.hr)
 await mountApp('/finance/payroll/pr-may')
 const sara = () => row('Sara Iqbal')?.textContent ?? ''
 check('each person shows with their number and figures; bonus, gross and net are the database’s',
-  ['#0003', '100,000', '10,000(10%)', '1.5', '113,000', '105,500', 'Two sick days unpaid'].every((s) => sara().includes(s)),
+  ['#0003', '100,000', '10,000(10%)', '1.5', '115,000', '109,500', 'Two sick days unpaid'].every((s) => sara().includes(s)),
   sara())
 const footer = () => document.querySelector('tfoot')?.textContent ?? ''
-check('…with a total under each column', footer().includes('643,000') && footer().includes('586,500'), footer())
+check('…with a total under each column', footer().includes('645,000') && footer().includes('590,500'), footer())
 check('HR can send it for review but not approve it', !!button('Send for review') && !button('Approve'))
 
 // A click anywhere on a draft's row opens its editor, like the Edit button.
@@ -118,7 +118,7 @@ check('absent days go in half days only: the browser holds the form back',
 await type('Absent days', '2.5', d())
 await type('Basic salary', '120000', d())
 check('the dialog works out gross and net as figures change',
-  d().textContent?.includes('Gross salary PKR 135,000') && d().textContent?.includes('Net payable PKR 127,500'),
+  d().textContent?.includes('Gross salary PKR 137,000') && d().textContent?.includes('Net payable PKR 131,500'),
   d().textContent)
 await type('HR remarks', '  Unpaid half day  ', d())
 await click(button('Save', d()))
@@ -127,7 +127,7 @@ check('HR’s save sends only HR’s columns, for that line',
     JSON.stringify({ basic_salary: 120000, contractual_amount: 0, absent_days: 2.5, hr_remarks: 'Unpaid half day' }) &&
     JSON.stringify(lastUpdate()?.filters) === '[["id","eq","pi-may-sara"]]',
   JSON.stringify(lastUpdate()))
-check('…and the table shows the new figures', await waitFor(() => sara().includes('127,500') && sara().includes('2.5')))
+check('…and the table shows the new figures', await waitFor(() => sara().includes('131,500') && sara().includes('2.5')))
 
 // ============================== finance edits the rest ==============================
 reset()
@@ -143,8 +143,8 @@ await choose('Bonus as', 'Amount', d())
 await type('Bonus', '15000', d())
 await type('Arrears', '3000', d())
 await type('Tax amount', '', d())
-check('…and arrears count towards gross and net as they’re typed',
-  d().textContent?.includes('Gross salary PKR 121,000') && d().textContent?.includes('Net payable PKR 118,000'),
+check('…and arrears and the advance count towards gross and net, only the loan and tax come off',
+  d().textContent?.includes('Gross salary PKR 123,000') && d().textContent?.includes('Net payable PKR 122,000'),
   d().textContent)
 await type('Finance remarks', '=HYPERLINK("x")', d())
 await click(button('Save', d()))
@@ -153,7 +153,22 @@ check('finance’s save sends only finance’s columns, a blank amount as 0',
     bonus_type: 'amount', bonus_value: 15000, absent_deduction: 5000, allowance: 8000, arrears: 3000, advance_salary: 2000,
     loan_deduction: 1000, tax_amount: 0, finance_remarks: '=HYPERLINK("x")',
   }), JSON.stringify(lastUpdate()?.values))
-check('…and the table shows the new figures', await waitFor(() => sara().includes('118,000') && !sara().includes('(10%)')))
+check('…and the table shows the new figures', await waitFor(() => sara().includes('122,000') && !sara().includes('(10%)')))
+
+// A line kept on the old advance rule is worked out that way in the dialog.
+await click(button('Close', d()))
+await waitFor(() => !dialog())
+const saraMay = table('payroll_items').find((i) => i.id === 'pi-may-sara')!
+saraMay.advance_deducted = true
+await mountApp('/finance/payroll/pr-may')
+await click(button('Edit Sara Iqbal'))
+check('a line kept on the old rule still takes the advance off net',
+  d().textContent?.includes('Gross salary PKR 121,000') && d().textContent?.includes('Net payable PKR 118,000') &&
+    d().textContent?.includes('the rule when this payroll was run'), d().textContent)
+await click(button('Close', d()))
+await waitFor(() => !dialog())
+saraMay.advance_deducted = false
+await mountApp('/finance/payroll/pr-may')
 
 await click(button('Edit Bilal Ahmed'))
 failNext('payroll_items.update', { message: 'This payroll is in review. Only a draft payroll can be changed.' })
@@ -169,12 +184,12 @@ const lines = csv.split('\r\n')
 check('the CSV is named for the month', downloads.at(-1) === 'payroll-2026-05.csv', downloads.join())
 check('…has every column',
   lines[0] === 'Employee number,Name,Basic salary,Contractual amount,Bonus % of basic,Bonus,Absent days,' +
-    'Absent deduction,Allowance,Arrears,Gross salary,Advance salary,Loan deduction,Tax amount,Net payable salary,' +
+    'Absent deduction,Allowance,Arrears,Advance salary,Gross salary,Loan deduction,Tax amount,Net payable salary,' +
     'HR remarks,Finance remarks', lines[0])
 check('…a line per person, by employee number',
   lines.length === 4 && lines[1].startsWith('1,Amna Khan,') && lines[2].startsWith('2,Bilal Ahmed,'), lines.join(' | '))
 check('…with plain numbers, and text a spreadsheet would run as a formula kept as text',
-  lines[3] === '3,Sara Iqbal,100000,0,,15000,1.5,5000,8000,3000,121000,2000,1000,0,118000,Two sick days unpaid,' +
+  lines[3] === '3,Sara Iqbal,100000,0,,15000,1.5,5000,8000,3000,2000,123000,1000,0,122000,Two sick days unpaid,' +
     '"\'=HYPERLINK(""x"")"', lines[3])
 
 // ============================== adding and removing people ==============================
@@ -301,19 +316,40 @@ await click(row('April'))
 const slip = () => d().textContent ?? ''
 check('a payslip opens to its breakdown',
   ['Payslip · April 2026', 'Basic salary100,000', 'Bonus (5% of basic)5,000', 'Allowance8,000', 'Arrears6,000',
-    'Absent deduction (0.5 day)-2,000', 'Gross salary117,000', 'Tax4,000', 'Total deductions4,000',
+    'Gross salary119,000', 'Absent deduction (0.5 day)2,000', 'Tax4,000', 'Total deductions6,000',
     'Net payable salaryPKR 113,000'].every((t) => slip().includes(t)), slip())
 check('…without the internal remarks', !slip().includes('Internal'))
+check('…absent days under deductions, not earnings',
+  !document.querySelector('[aria-label="Earnings"]')?.textContent?.includes('Absent') &&
+  !!document.querySelector('[aria-label="Deductions"]')?.textContent?.includes('Absent deduction (0.5 day)2,000'))
+check('…leaving out the lines that are zero',
+  !['Contractual amount', 'Advance salary', 'Loan deduction'].some((t) => slip().includes(t)), slip())
 check('…and says when it was disbursed', slip().includes('· Disbursed '), slip())
 
+// The logo fetch, caught. jsdom can't draw images, so the payslip falls back
+// to the company's short name, as it would if the logo couldn't load.
+const fetched: string[] = []
+globalThis.fetch = (async (url: string) => (fetched.push(String(url)), new Response(new Blob(['png'])))) as typeof fetch
+const readsBefore = captured.reads.length
 await click(button('Download PDF', d()))
 const pdf = await blobs.at(-1)!.text()
 check('…and downloads as a PDF named for the month',
   downloads.at(-1) === 'payslip-2026-04.pdf' && pdf.startsWith('%PDF'), downloads.at(-1))
 check('…with the person, their designation, the figures and net pay in it',
   ['(Sara Iqbal)', '(#0003)', '(Software Engineer)', '(Engineering)', '(April 2026)', '(Arrears)', '(6,000)',
-    '(Gross salary)', '(117,000)', '(PKR 113,000)', '(DISBURSED ON)'].every((t) => pdf.includes(t)),
+    '(Gross earnings \\(A\\))', '(119,000)', '(Total deductions \\(B\\))', '(NET PAYABLE \\(A - B\\))',
+    '(PKR 113,000)', '(Disbursed on)', '(SALARY SLIP)'].every((t) => pdf.includes(t)),
   pdf.match(/\((?:[^()\\]|\\.)*\) Tj/g)?.slice(0, 40).join(' '))
+check('…reading the branding row for the logo and company details',
+  captured.reads.slice(readsBefore).some((r) => r.startsWith('branding')) &&
+  fetched.at(-1) === 'https://public.example/branding/logo-old.png', JSON.stringify([captured.reads.slice(readsBefore), fetched]))
+check('…the registered name, INC and NTN numbers at the top, and the short name standing in for the logo',
+  ['(ELEVANCE LABS \\(SMC-PRIVATE\\) LIMITED)', '(INC# 0291676)', '(NTN# G555609)', '(Elevance Labs)']
+    .every((t) => pdf.includes(t)))
+check('…the address, internal emails and internal numbers in the footer, nothing external',
+  ['(SB37 Anum Tower, Room 1)', '(Block 13C, Gulshan-e-Iqbal, Karachi)', '(contact@elevancelabs.com)', '(0311 2642645)',
+    '(0300 1113883)'].every((t) => pdf.includes(t)) &&
+  !pdf.includes('careers@elevancelabs.com') && !pdf.includes('021 1234567'))
 await click(button('Close', d()))
 await waitFor(() => !dialog())
 
@@ -321,6 +357,42 @@ const before = downloads.length
 await click(button('Download April 2026 payslip'))
 check('a payslip downloads from its row too', await waitFor(() => downloads.length === before + 1) &&
   downloads.at(-1) === 'payslip-2026-04.pdf' && !dialog())
+
+// An advance paid with this month's salary is an earning, and in the PDF too.
+reset()
+Object.assign(table('payroll_items').find((i) => i.id === 'pi-apr-sara')!, { advance_salary: 3000 })
+signInAs(PEOPLE.member)
+await mountApp('/profile?tab=payslips')
+await waitFor(() => slipRows().length === 1)
+await click(row('April'))
+check('an advance shows under earnings, not deductions, and adds to gross and net',
+  !!document.querySelector('[aria-label="Earnings"]')?.textContent?.includes('Advance salary3,000') &&
+    !document.querySelector('[aria-label="Deductions"]')?.textContent?.includes('Advance') &&
+    slip().includes('Gross salary122,000') && slip().includes('Net payable salaryPKR 116,000'), slip())
+await click(button('Download PDF', d()))
+const advancePdf = await blobs.at(-1)!.text()
+check('…and in the PDF, where zero lines are left out too',
+  advancePdf.includes('(Advance salary)') && advancePdf.includes('(3,000)') &&
+    !advancePdf.includes('(Loan deduction)') && !advancePdf.includes('(Contractual amount)'))
+await click(button('Close', d()))
+await waitFor(() => !dialog())
+
+// A line from a payroll run before advance salary became an addition keeps
+// the old rule: the advance comes off net and shows under deductions.
+reset()
+Object.assign(table('payroll_items').find((i) => i.id === 'pi-apr-sara')!, { advance_salary: 3000, advance_deducted: true })
+signInAs(PEOPLE.member)
+await mountApp('/profile?tab=payslips')
+await waitFor(() => slipRows().length === 1)
+await click(row('April'))
+const earningsTable = () => document.querySelector('[aria-label="Earnings"]')?.textContent ?? ''
+const deductionsTable = () => document.querySelector('[aria-label="Deductions"]')?.textContent ?? ''
+check('a payslip from before the change keeps its figures: the advance under deductions, off net',
+  !earningsTable().includes('Advance') && deductionsTable().includes('Advance salary3,000') &&
+    slip().includes('Gross salary119,000') && slip().includes('Total deductions9,000') &&
+    slip().includes('Net payable salaryPKR 110,000'), slip())
+await click(button('Close', d()))
+await waitFor(() => !dialog())
 
 reset()
 signInAs(PEOPLE.hr)

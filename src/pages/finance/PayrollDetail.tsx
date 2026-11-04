@@ -269,6 +269,7 @@ export default function PayrollDetail() {
     advance_salary: amount(form.advance_salary) || 0,
     loan_deduction: amount(form.loan_deduction) || 0,
     tax_amount: amount(form.tax_amount) || 0,
+    advance_deducted: editing?.advance_deducted ?? false,
   }
   // Pinned cells are opaque, so they take the row's hover tint as an overlay.
   const pinned = { position: 'sticky', bgcolor: 'background.paper', zIndex: 1 } as const
@@ -523,7 +524,9 @@ export default function PayrollDetail() {
               <strong>PKR {formatAmount(netOf(preview))}</strong>
             </Typography>
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              Gross = basic + contractual + bonus + allowance + arrears − absent deduction. Net = gross − advance − loan − tax.
+              {preview.advance_deducted
+                ? 'Gross = basic + contractual + bonus + allowance + arrears − absent deduction. Net = gross − advance − loan − tax (the rule when this payroll was run).'
+                : 'Gross = basic + contractual + bonus + allowance + arrears + advance − absent deduction. Net = gross − loan − tax.'}
             </Typography>
           </Paper>
         )}

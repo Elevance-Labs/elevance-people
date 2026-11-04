@@ -287,7 +287,9 @@ behaviour).
   (mirror of `reimbursement_move` / `_disburse`), the receipt and reference
   limits, file checks, reimbursements-bucket upload / remove, error messages.
 - `payslip.ts` — the payslip PDF (jsPDF, imported dynamically so it loads
-  only on download).
+  only on download): logo and company details from branding.
+- `branding.ts` — the company detail fields on branding (labels, limits,
+  select list) and splitting a multi-line field.
 - `equipment.ts` — equipment select (named vendor FK), vendor select with
   equipment count, IBAN normalising, equipment-bucket upload / remove, error
   messages.
@@ -431,7 +433,9 @@ Full detail in `supabase/schema.sql`.
   `payroll_create` adds everyone
   who may log in. `payroll_items` — one line per person; name and number
   copied in, bonus / gross / net are generated columns, kept (employee id
-  nulled) if the employee is deleted. `payroll_items_guard`: changes only
+  nulled) if the employee is deleted; advance salary adds to gross, except
+  on lines flagged `advance_deducted` (payrolls run before that rule; not
+  client-writable). `payroll_items_guard`: changes only
   while draft, HR's columns vs finance's, only login statuses added,
   basic and contractual from the salary in force that month (`salary_on`),
   else carried from the latest earlier payroll, as the allowance always is. Payroll roles
@@ -518,8 +522,10 @@ Full detail in `supabase/schema.sql`.
   caller. `my_one_on_one` — the caller's current 1:1: due date, manager, the
   review's state (not contents) and their feedback's.
 - `branding` — one row: logo path, primary colour, perks (jsonb checked by
-  `valid_perks`). Everyone signed in reads, company admins update; anon gets
-  it via `public_branding`. Logo in the public `branding` bucket.
+  `valid_perks`), company details (names, address, internal / external
+  emails and numbers, INC and NTN; payslips show them). Everyone signed in
+  reads, company admins update; anon gets only logo, colour and perks via
+  `public_branding`. Logo in the public `branding` bucket.
 - `guides` — one per doc: slug, title, function, optional Google link,
   order. Read only from the app (no write grants; kept from the Supabase
   dashboard); RLS: company admins all, everyone else only

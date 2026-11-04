@@ -243,10 +243,16 @@ for (const id of ['j-draft', 'nope']) {
 reset()
 signInAs(PEOPLE.companyAdmin)
 await mountApp('/company/branding')
-check('branding loads the logo, colour and perks',
+const detail = (label: string) => (field(label)?.querySelector('input, textarea') as HTMLInputElement | null)?.value
+check('branding loads the logo, colour, perks and company details',
   document.querySelector('img[alt="Logo"]')?.getAttribute('src') === 'https://public.example/branding/logo-old.png' &&
   (field('Hex')?.querySelector('input') as HTMLInputElement | null)?.value === '#0a7d5a' &&
-  [...document.querySelectorAll('input')].some((i) => i.value === 'Remote Fridays'))
+  [...document.querySelectorAll('input')].some((i) => i.value === 'Remote Fridays') &&
+  detail('Business name (long)') === 'ELEVANCE LABS (SMC-PRIVATE) LIMITED' && detail('NTN number') === 'G555609' &&
+  detail('Internal numbers') === '0311 2642645\n0300 1113883')
+check('…with a field for each detail',
+  ['Business name (short)', 'Business name (long)', 'INC number', 'NTN number', 'Address', 'Internal emails',
+    'Internal numbers', 'External emails', 'External numbers'].every((l) => field(l)))
 
 await type('Hex', 'teal')
 await click(button('Save branding'))
@@ -261,13 +267,21 @@ const perkFields = [...document.querySelectorAll<HTMLElement>('.MuiFormControl-r
 await type('Perk', 'Gym membership', perkFields.at(-1)!.parentElement!)
 await click(button('Move Gym membership up'))
 await click(button('Add perk')) // left blank: dropped on save
+await type('INC number', '  0291677 ')
+await type('External numbers', '   ')
 await click(button('Save branding'))
 const brandingUpdate = captured.updates.find((u) => u.table === 'branding')
 check('saving sends colour (lower case) and perks in their new order, blank rows dropped',
   JSON.stringify(brandingUpdate?.values) === JSON.stringify({
     logo_path: 'logo-old.png', primary_color: '#1e88e5',
     perks: [{ title: 'Gym membership', description: null }, { title: 'Health insurance', description: 'For you and your family' }],
+    business_name_short: 'Elevance Labs', business_name_long: 'ELEVANCE LABS (SMC-PRIVATE) LIMITED', inc_number: '0291677',
+    ntn_number: 'G555609', address: 'SB37 Anum Tower, Room 1\nBlock 13C, Gulshan-e-Iqbal, Karachi',
+    internal_emails: 'contact@elevancelabs.com', internal_numbers: '0311 2642645\n0300 1113883',
+    external_emails: 'careers@elevancelabs.com', external_numbers: null,
   }), JSON.stringify(brandingUpdate?.values))
+check('…company details trimmed, a blank one saved as none', brandingUpdate?.values.inc_number === '0291677' &&
+  brandingUpdate?.values.external_numbers === null)
 check('…to the single branding row, and no logo is touched', JSON.stringify(brandingUpdate?.filters) ===
   JSON.stringify([['id', 'eq', true]]) && !captured.uploads.length && !captured.removals.length)
 

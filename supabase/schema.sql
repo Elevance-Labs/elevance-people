@@ -384,9 +384,11 @@ create index application_stage_events_application_idx
   on public.application_stage_events (application_id, id);
 
 -- ---------------------------------------------------------------------------
--- Branding: logo, primary colour, perks and benefits. Exactly one row; every
--- employee reads it, company admins change it, and the public job page gets
--- it through public_branding.
+-- Branding: logo, primary colour, perks and benefits, and the company's
+-- details (names, address, contacts, INC and NTN numbers; payslips show
+-- them). Exactly one row; every employee reads it, company admins change it,
+-- and the public job page gets the logo, colour and perks through
+-- public_branding.
 -- ---------------------------------------------------------------------------
 
 -- Perks are [{ "title": "…", "description": "…" | null }, …] in display order.
@@ -409,7 +411,26 @@ create table public.branding (
   logo_path     text,
   primary_color text not null default '#3f51b5' check (primary_color ~ '^#[0-9a-f]{6}$'),
   perks         jsonb not null default '[]' check (public.valid_perks(perks)),
-  updated_at    timestamptz not null default now()
+  updated_at    timestamptz not null default now(),
+  -- Company details, free text; emails and numbers may hold several.
+  business_name_short text
+    check (business_name_short is null or (btrim(business_name_short) <> '' and length(business_name_short) <= 100)),
+  business_name_long text
+    check (business_name_long is null or (btrim(business_name_long) <> '' and length(business_name_long) <= 200)),
+  address text
+    check (address is null or (btrim(address) <> '' and length(address) <= 500)),
+  internal_emails text
+    check (internal_emails is null or (btrim(internal_emails) <> '' and length(internal_emails) <= 500)),
+  external_emails text
+    check (external_emails is null or (btrim(external_emails) <> '' and length(external_emails) <= 500)),
+  internal_numbers text
+    check (internal_numbers is null or (btrim(internal_numbers) <> '' and length(internal_numbers) <= 500)),
+  external_numbers text
+    check (external_numbers is null or (btrim(external_numbers) <> '' and length(external_numbers) <= 500)),
+  inc_number text
+    check (inc_number is null or (btrim(inc_number) <> '' and length(inc_number) <= 50)),
+  ntn_number text
+    check (ntn_number is null or (btrim(ntn_number) <> '' and length(ntn_number) <= 50))
 );
 insert into public.branding default values;
 
@@ -673,17 +694,24 @@ create table public.payroll_items (
   updated_at         timestamptz not null default now(),
   -- Pay owed from earlier months.
   arrears            numeric(12, 2) not null default 0 check (arrears >= 0),
+  -- Advance salary is paid out with the month's pay (in gross), recovered
+  -- later by the loan deduction. True = the earlier rule, kept for lines on
+  -- payrolls run before that change: the advance comes off net, not in
+  -- gross. Not client-writable; new lines are false.
+  advance_deducted   boolean not null default false,
   gross_salary       numeric(12, 2) not null generated always as (
                        basic_salary + contractual_amount
                        + case when bonus_type = 'percent' then round(basic_salary * bonus_value / 100, 2)
                               else bonus_value end
-                       + allowance + arrears - absent_deduction) stored,
+                       + allowance + arrears - absent_deduction
+                       + case when advance_deducted then 0 else advance_salary end) stored,
   net_salary         numeric(12, 2) not null generated always as (
                        basic_salary + contractual_amount
                        + case when bonus_type = 'percent' then round(basic_salary * bonus_value / 100, 2)
                               else bonus_value end
                        + allowance + arrears - absent_deduction
-                       - advance_salary - loan_deduction - tax_amount) stored,
+                       + case when advance_deducted then -advance_salary else advance_salary end
+                       - loan_deduction - tax_amount) stored,
   constraint payroll_items_employee_key unique (payroll_id, employee_id)
 );
 create index payroll_items_employee_idx on public.payroll_items (employee_id);
@@ -2907,12 +2935,12 @@ returns table (payroll_id uuid, year integer, month integer, disbursed_at timest
                contractual_amount numeric, bonus_type text, bonus_value numeric, bonus numeric,
                absent_days numeric, absent_deduction numeric, allowance numeric, arrears numeric,
                gross_salary numeric, advance_salary numeric, loan_deduction numeric,
-               tax_amount numeric, net_salary numeric)
+               tax_amount numeric, net_salary numeric, advance_deducted boolean)
 language sql stable security definer set search_path = '' as $$
   select p.id, p.year, p.month, p.disbursed_at, i.employee_number, i.full_name, i.basic_salary,
          i.contractual_amount, i.bonus_type, i.bonus_value, i.bonus, i.absent_days,
          i.absent_deduction, i.allowance, i.arrears, i.gross_salary, i.advance_salary,
-         i.loan_deduction, i.tax_amount, i.net_salary
+         i.loan_deduction, i.tax_amount, i.net_salary, i.advance_deducted
     from public.payroll_items i
     join public.payrolls p on p.id = i.payroll_id
    where p.status = 'disbursed' and i.employee_id = public.current_employee_id()
@@ -3847,7 +3875,9 @@ grant select (id, job_opening_id, full_name, email, phone, note, resume_path, re
               created_at, stage, stage_changed_at)
   on public.job_applications to authenticated;
 grant select on public.application_stage_events to authenticated;
-grant select, update (logo_path, primary_color, perks) on public.branding to authenticated;
+grant select, update (logo_path, primary_color, perks, business_name_short, business_name_long, address,
+                      internal_emails, external_emails, internal_numbers, external_numbers, inc_number, ntn_number)
+  on public.branding to authenticated;
 
 grant select, delete on public.announcements to authenticated;
 -- created_by is stamped by the trigger, so it isn't writable.

@@ -22,8 +22,14 @@ import { Logo, PageHeader } from '../../components/common'
 import { BRANDING_BUCKET, supabase } from '../../lib/supabase'
 import { COMPANY_NAME, LOGO_ACCEPT, LOGO_MAX_BYTES } from '../../lib/constants'
 import { logoUrl } from '../../lib/hiring'
+import { COMPANY_DETAIL_COLUMNS, COMPANY_DETAIL_FIELDS } from '../../lib/branding'
 import { brandedTheme, DEFAULT_PRIMARY } from '../../theme'
-import type { Branding as BrandingRow, Perk } from '../../lib/types'
+import type { Branding, CompanyDetails, Perk } from '../../lib/types'
+
+type BrandingRow = Branding & CompanyDetails
+const COLUMNS = `logo_path, primary_color, perks, ${COMPANY_DETAIL_COLUMNS}`
+
+type DetailsDraft = Record<keyof CompanyDetails, string>
 
 const HEX = /^#[0-9a-f]{6}$/
 
@@ -43,13 +49,17 @@ function Section({ title, description, children }: { title: string; description:
   )
 }
 
-// Company → Branding (company admins). For now it styles the public job page.
+// Company → Branding (company admins). The logo, colour and perks style the
+// public job page; the logo and company details go on payslips.
 // Everything is saved together: a picked logo is only uploaded on Save, and
 // the file it replaces is removed afterwards.
 export default function Branding() {
   const [saved, setSaved] = useState<BrandingRow | null>(null)
   const [color, setColor] = useState(DEFAULT_PRIMARY)
   const [perks, setPerks] = useState<PerkDraft[]>([])
+  const [details, setDetails] = useState<DetailsDraft>(
+    () => Object.fromEntries(COMPANY_DETAIL_FIELDS.map((f) => [f.key, ''])) as DetailsDraft,
+  )
   // undefined = keep the saved logo, null = remove it, File = replace it.
   const [logo, setLogo] = useState<File | null | undefined>(undefined)
   const [loading, setLoading] = useState(true)
@@ -62,17 +72,18 @@ export default function Branding() {
     setSaved(row)
     setColor(row.primary_color)
     setPerks(row.perks.map((p) => ({ title: p.title, description: p.description ?? '' })))
+    setDetails(Object.fromEntries(COMPANY_DETAIL_FIELDS.map((f) => [f.key, row[f.key] ?? ''])) as DetailsDraft)
     setLogo(undefined)
   }
 
   useEffect(() => {
     supabase
       .from('branding')
-      .select('logo_path, primary_color, perks')
+      .select(COLUMNS)
       .maybeSingle()
       .then(({ data, error: loadError }) => {
         if (loadError) setError(loadError.message)
-        else if (data) show(data as BrandingRow)
+        else if (data) show(data as unknown as BrandingRow)
         setLoading(false)
       })
   }, [])
@@ -132,12 +143,14 @@ export default function Branding() {
       perks: perks
         .filter((p) => p.title.trim())
         .map<Perk>((p) => ({ title: p.title.trim(), description: p.description.trim() || null })),
+      // Blank fields are saved as none.
+      ...Object.fromEntries(COMPANY_DETAIL_FIELDS.map((f) => [f.key, details[f.key].trim() || null])),
     }
     const { data, error: saveError } = await supabase
       .from('branding')
       .update(payload)
       .eq('id', true)
-      .select('logo_path, primary_color, perks')
+      .select(COLUMNS)
       .single()
     if (saveError) {
       if (logo) await supabase.storage.from(BRANDING_BUCKET).remove([logoPath!])
@@ -152,7 +165,7 @@ export default function Branding() {
     // The old file is no longer referenced. Failing to remove it only leaves a stray file.
     if (previous && previous !== logoPath) await supabase.storage.from(BRANDING_BUCKET).remove([previous])
     setBusy(false)
-    show(data as BrandingRow)
+    show(data as unknown as BrandingRow)
     setNotice('Branding saved')
   }
 
@@ -166,7 +179,10 @@ export default function Branding() {
 
   return (
     <Box component="form" onSubmit={save} sx={{ maxWidth: 900 }}>
-      <PageHeader title="Branding" subtitle="Your logo, colour, and perks and benefits, shown on public job pages." />
+      <PageHeader
+        title="Branding"
+        subtitle="Your logo, colour, perks and benefits for public job pages, and the company details payslips show."
+      />
 
       <Stack spacing={3}>
         <Section title="Logo" description="PNG, JPEG or WebP, up to 2 MB. A wide logo on a transparent background works best.">
@@ -210,6 +226,26 @@ export default function Branding() {
               With no logo, public pages show the default mark and the company name.
             </Typography>
           )}
+        </Section>
+
+        <Section
+          title="Company details"
+          description="Payslips show the logo, the long name, the INC and NTN numbers, and the address, internal emails and internal numbers in the footer. Put several emails or numbers on separate lines."
+        >
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+            {COMPANY_DETAIL_FIELDS.map((f) => (
+              <TextField
+                key={f.key}
+                label={f.label}
+                value={details[f.key]}
+                onChange={(e) => setDetails((d) => ({ ...d, [f.key]: e.target.value }))}
+                helperText={f.helper}
+                multiline={f.multiline}
+                minRows={f.multiline ? 2 : undefined}
+                slotProps={{ htmlInput: { maxLength: f.max } }}
+              />
+            ))}
+          </Box>
         </Section>
 
         <Section title="Primary colour" description="Used for the header band, buttons and links on public job pages.">

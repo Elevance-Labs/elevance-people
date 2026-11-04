@@ -51,6 +51,7 @@ type Figures = Pick<
   | 'advance_salary'
   | 'loan_deduction'
   | 'tax_amount'
+  | 'advance_deducted'
 >
 
 const round2 = (n: number) => Math.round(n * 100) / 100
@@ -58,10 +59,16 @@ const round2 = (n: number) => Math.round(n * 100) / 100
 export const bonusOf = (f: Figures) =>
   f.bonus_type === 'percent' ? round2((f.basic_salary * f.bonus_value) / 100) : f.bonus_value
 
+// Advance salary is paid out (in gross); the loan deduction recovers it later.
+// Lines run before that rule (advance_deducted) take it off net instead.
 export const grossOf = (f: Figures) =>
-  round2(f.basic_salary + f.contractual_amount + bonusOf(f) + f.allowance + f.arrears - f.absent_deduction)
+  round2(
+    f.basic_salary + f.contractual_amount + bonusOf(f) + f.allowance + f.arrears - f.absent_deduction +
+      (f.advance_deducted ? 0 : f.advance_salary),
+  )
 
-export const netOf = (f: Figures) => round2(grossOf(f) - f.advance_salary - f.loan_deduction - f.tax_amount)
+export const netOf = (f: Figures) =>
+  round2(grossOf(f) - f.loan_deduction - f.tax_amount - (f.advance_deducted ? f.advance_salary : 0))
 
 // ---------------------------------------------------------------------------
 // Table columns and CSV
@@ -76,8 +83,8 @@ export const AMOUNT_COLUMNS = [
   ['absent_deduction', 'Absent deduction'],
   ['allowance', 'Allowance'],
   ['arrears', 'Arrears'],
-  ['gross_salary', 'Gross salary'],
   ['advance_salary', 'Advance salary'],
+  ['gross_salary', 'Gross salary'],
   ['loan_deduction', 'Loan deduction'],
   ['tax_amount', 'Tax amount'],
   ['net_salary', 'Net payable salary'],
@@ -97,8 +104,8 @@ const CSV_COLUMNS: [string, (i: PayrollItem) => string | number | null][] = [
   ['Absent deduction', (i) => i.absent_deduction],
   ['Allowance', (i) => i.allowance],
   ['Arrears', (i) => i.arrears],
-  ['Gross salary', (i) => i.gross_salary],
   ['Advance salary', (i) => i.advance_salary],
+  ['Gross salary', (i) => i.gross_salary],
   ['Loan deduction', (i) => i.loan_deduction],
   ['Tax amount', (i) => i.tax_amount],
   ['Net payable salary', (i) => i.net_salary],
@@ -146,28 +153,38 @@ export const downloadCsv = (fileName: string, csv: string) =>
 
 export type PayslipLine = [label: string, amount: number]
 
-// A payslip as the dialog and the PDF both lay it out: earnings less the
-// absent deduction make gross; gross less deductions is net.
+// A payslip as the dialog and the PDF both lay it out: earnings (advance
+// salary included) are gross before absences; deductions are the absent
+// deduction, loan deduction and tax (and the advance, on lines kept on the
+// old rule). Gross less deductions is net. The payroll's own gross_salary is
+// after absences, so the slip's gross is that plus the absent deduction.
+// Lines that are zero are left out, so nobody wonders about an advance or a
+// bonus they never had; the totals always show.
+const nonZero = (lines: PayslipLine[]) => lines.filter(([, amount]) => amount !== 0)
+
 export function payslipBreakdown(p: Payslip) {
   const days = `${p.absent_days} ${p.absent_days === 1 || p.absent_days === 0.5 ? 'day' : 'days'}`
-  const earnings: PayslipLine[] = [
+  const earnings = nonZero([
     ['Basic salary', p.basic_salary],
     ['Contractual amount', p.contractual_amount],
     [p.bonus_type === 'percent' ? `Bonus (${p.bonus_value}% of basic)` : 'Bonus', p.bonus],
     ['Allowance', p.allowance],
     ['Arrears', p.arrears],
-    [`Absent deduction (${days})`, -p.absent_deduction],
-  ]
-  const deductions: PayslipLine[] = [
-    ['Advance salary', p.advance_salary],
+    ...(p.advance_deducted ? [] : [['Advance salary', p.advance_salary] as PayslipLine]),
+  ])
+  const deductions = nonZero([
+    [`Absent deduction (${days})`, p.absent_deduction],
+    ...(p.advance_deducted ? [['Advance salary', p.advance_salary] as PayslipLine] : []),
     ['Loan deduction', p.loan_deduction],
     ['Tax', p.tax_amount],
-  ]
+  ])
   return {
     earnings,
-    gross: p.gross_salary,
+    gross: round2(p.gross_salary + p.absent_deduction),
     deductions,
-    totalDeductions: round2(p.advance_salary + p.loan_deduction + p.tax_amount),
+    totalDeductions: round2(
+      p.absent_deduction + p.loan_deduction + p.tax_amount + (p.advance_deducted ? p.advance_salary : 0),
+    ),
     net: p.net_salary,
   }
 }

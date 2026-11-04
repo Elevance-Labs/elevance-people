@@ -223,6 +223,10 @@ const BRANDING: Row[] = [
   {
     id: true, logo_path: 'logo-old.png', primary_color: '#0a7d5a',
     perks: [{ title: 'Health insurance', description: 'For you and your family' }, { title: 'Remote Fridays', description: null }],
+    business_name_short: 'Elevance Labs', business_name_long: 'ELEVANCE LABS (SMC-PRIVATE) LIMITED',
+    address: 'SB37 Anum Tower, Room 1\nBlock 13C, Gulshan-e-Iqbal, Karachi', internal_emails: 'contact@elevancelabs.com',
+    external_emails: 'careers@elevancelabs.com', internal_numbers: '0311 2642645\n0300 1113883',
+    external_numbers: '021 1234567', inc_number: '0291676', ntn_number: 'G555609',
   },
 ]
 
@@ -393,7 +397,7 @@ const SALARY_REVISIONS: Row[] = [
 const NO_FIGURES = {
   basic_salary: 0, contractual_amount: 0, bonus_type: 'amount', bonus_value: 0, absent_days: 0, absent_deduction: 0,
   allowance: 0, arrears: 0, advance_salary: 0, loan_deduction: 0, tax_amount: 0, hr_remarks: null,
-  finance_remarks: null,
+  finance_remarks: null, advance_deducted: false,
 }
 
 function payrollItem(id: string, payroll_id: string, who: Employee, figures: Row = {}): Row {
@@ -427,8 +431,10 @@ const PAYROLL_ITEMS: Row[] = [
 function payrollFigures(r: Row) {
   const n = (k: string) => Number(r[k] ?? 0)
   const bonus = r.bonus_type === 'percent' ? Math.round(n('basic_salary') * n('bonus_value')) / 100 : n('bonus_value')
-  const gross = n('basic_salary') + n('contractual_amount') + bonus + n('allowance') + n('arrears') - n('absent_deduction')
-  return { bonus, gross_salary: gross, net_salary: gross - n('advance_salary') - n('loan_deduction') - n('tax_amount') }
+  const old = r.advance_deducted === true
+  const gross = n('basic_salary') + n('contractual_amount') + bonus + n('allowance') + n('arrears') - n('absent_deduction') +
+    (old ? 0 : n('advance_salary'))
+  return { bonus, gross_salary: gross, net_salary: gross - n('loan_deduction') - n('tax_amount') - (old ? n('advance_salary') : 0) }
 }
 
 // TechHub supplies equipment, so only PrintCo can be deleted.

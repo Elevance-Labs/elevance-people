@@ -269,6 +269,20 @@ export interface Branding {
   perks: Perk[]
 }
 
+// The company's details on the branding row (signed-in only, never in
+// public_branding). Free text; emails and numbers may hold several lines.
+export interface CompanyDetails {
+  business_name_short: string | null
+  business_name_long: string | null
+  address: string | null
+  internal_emails: string | null
+  external_emails: string | null
+  internal_numbers: string | null
+  external_numbers: string | null
+  inc_number: string | null
+  ntn_number: string | null
+}
+
 export interface Announcement {
   id: string
   // Rich text (HTML); sanitise before showing it.
@@ -454,6 +468,9 @@ export interface PayrollItem {
   loan_deduction: number
   tax_amount: number
   finance_remarks: string | null
+  // True on lines from payrolls run before advance salary became an
+  // addition: there the advance comes off net instead. Set by the database.
+  advance_deducted: boolean
   // Worked out by the database (mirrored in lib/payroll.ts).
   bonus: number
   gross_salary: number
