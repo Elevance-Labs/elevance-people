@@ -1,7 +1,6 @@
-import { useRef, useState, type ReactElement, type ReactNode } from 'react'
-import { Box, Button, Chip, Paper, Stack, Tab, Tabs, Typography } from '@mui/material'
+import { useState, type ReactElement, type ReactNode } from 'react'
+import { Box, Chip, Paper, Stack, Tab, Tabs, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import CalendarMonthOutlinedIcon from '@mui/icons-material/CalendarMonthOutlined'
 import CancelRoundedIcon from '@mui/icons-material/CancelRounded'
 import ChatOutlinedIcon from '@mui/icons-material/ChatOutlined'
@@ -10,7 +9,6 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import HubOutlinedIcon from '@mui/icons-material/HubOutlined'
 import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined'
-import VideocamOutlinedIcon from '@mui/icons-material/VideocamOutlined'
 import ViewKanbanOutlinedIcon from '@mui/icons-material/ViewKanbanOutlined'
 import { COMPANY_NAME } from '../lib/constants'
 
@@ -18,81 +16,7 @@ import { COMPANY_NAME } from '../lib/constants'
 const GOOD = '#2e7d32'
 const BAD = '#c62828'
 
-type ToolId = 'chat' | 'calendar' | 'docs' | 'jira' | 'meet'
 type CategoryId = 'chat' | 'calendar' | 'docs' | 'jira'
-
-interface Tool {
-  id: ToolId
-  name: string
-  // Its label on the filter.
-  short: string
-  icon: ReactElement
-  // The tool's accent, and a darker shade of it that reads well as text.
-  accent: string
-  ink: string
-  golden: string
-  anti: string
-  // The detailed norms that cover it.
-  category: CategoryId
-}
-
-const TOOLS: Tool[] = [
-  {
-    id: 'chat',
-    name: 'Google Chat',
-    short: 'Chat',
-    icon: <ChatOutlinedIcon />,
-    accent: '#2e9e5b',
-    ink: '#1b7a43',
-    golden: 'Thread all replies in Spaces; send complete message context in one ping.',
-    anti: 'Sending "Hi", waiting for a response, or posting unthreaded messages in main channels.',
-    category: 'chat',
-  },
-  {
-    id: 'calendar',
-    name: 'Google Calendar',
-    short: 'Calendar',
-    icon: <CalendarMonthOutlinedIcon />,
-    accent: '#3b82f6',
-    ink: '#1d4ed8',
-    golden: 'Set working hours and locations; require an agenda and links in every invite.',
-    anti: "Sending blank event invites or booking over someone's Focus Time.",
-    category: 'calendar',
-  },
-  {
-    id: 'docs',
-    name: 'Google Docs & Workspace',
-    short: 'Docs',
-    icon: <DescriptionOutlinedIcon />,
-    accent: '#f0a73a',
-    ink: '#b26a00',
-    golden: 'Leave inline @mentions directly on the document or sheet line item.',
-    anti: 'Sending document feedback via private Google Chat DMs with screenshots.',
-    category: 'docs',
-  },
-  {
-    id: 'jira',
-    name: 'Jira',
-    short: 'Jira',
-    icon: <ViewKanbanOutlinedIcon />,
-    accent: '#8e6cd8',
-    ink: '#5e35b1',
-    golden: 'Treat the Jira issue as the single source of truth for technical context and status.',
-    anti: 'Discussing scope changes or status updates solely in 1:1 chat messages.',
-    category: 'jira',
-  },
-  {
-    id: 'meet',
-    name: 'Google Meet',
-    short: 'Meet',
-    icon: <VideocamOutlinedIcon />,
-    accent: '#14a3a3',
-    ink: '#0f766e',
-    golden: 'Start instant Meets from Google Chat for 5–10 minute blockers; post notes after.',
-    anti: 'Holding 30-minute unscheduled video meetings without taking action notes.',
-    category: 'calendar',
-  },
-]
 
 interface Practice {
   title: string
@@ -292,67 +216,6 @@ function Mark({ good, label, children }: { good: boolean; label: string; childre
   )
 }
 
-function ToolBadge({ icon, accent, ink, size = 40 }: { icon: ReactElement; accent: string; ink: string; size?: number }) {
-  return (
-    <Box
-      aria-hidden
-      sx={{
-        width: size,
-        height: size,
-        flexShrink: 0,
-        borderRadius: 2,
-        display: 'grid',
-        placeItems: 'center',
-        bgcolor: '#fff',
-        color: ink,
-        border: 1,
-        borderColor: alpha(accent, 0.25),
-        boxShadow: `0 4px 12px ${alpha(accent, 0.2)}`,
-        '& svg': { fontSize: size * 0.55 },
-      }}
-    >
-      {icon}
-    </Box>
-  )
-}
-
-// One tool's golden rule against its anti-pattern: a row on wide screens,
-// stacked on narrow ones.
-function CheatRow({ tool }: { tool: Tool }) {
-  return (
-    <Paper
-      component="article"
-      variant="outlined"
-      sx={{
-        p: 2,
-        display: 'grid',
-        gap: 2,
-        alignItems: 'center',
-        gridTemplateColumns: { xs: '1fr', md: '220px 1fr 1fr' },
-        borderLeft: 4,
-        borderLeftColor: tool.accent,
-      }}
-    >
-      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-        <ToolBadge icon={tool.icon} accent={tool.accent} ink={tool.ink} />
-        <Typography variant="subtitle2" component="h4" sx={{ fontWeight: 700 }}>
-          {tool.name}
-        </Typography>
-      </Stack>
-      <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: alpha(GOOD, 0.06), height: '100%' }}>
-        <Mark good label="Golden rule:">
-          {tool.golden}
-        </Mark>
-      </Box>
-      <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: alpha(BAD, 0.05), height: '100%' }}>
-        <Mark good={false} label="Anti-pattern:">
-          {tool.anti}
-        </Mark>
-      </Box>
-    </Paper>
-  )
-}
-
 function PracticeCard({ practice, index, category }: { practice: Practice; index: number; category: Category }) {
   return (
     <Paper variant="outlined" sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 1, height: '100%' }}>
@@ -431,27 +294,16 @@ function RuleOfThumb({ category }: { category: Category }) {
   )
 }
 
-// The working norms for our tools: a quick cheat sheet of golden rules against
-// anti-patterns, then the detailed practices per tool, a tab each. Static, like
+// The working norms for our tools: a banner, then the detailed practices per
+// tool, a tab each. Static, like
 // the company values; edit the lists above to change them.
 export function WorkingGuidelines() {
-  const [filter, setFilter] = useState<ToolId | null>(null)
   const [tab, setTab] = useState<CategoryId>('chat')
-  const normsRef = useRef<HTMLDivElement>(null)
-
-  const pick = (id: ToolId | null) => {
-    setFilter(id)
-    if (id) setTab(TOOLS.find((t) => t.id === id)!.category)
-  }
-  // Not an href: the router owns the hash.
-  const jumpToNorms = () => normsRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
-
-  const shownTools = filter ? TOOLS.filter((t) => t.id === filter) : TOOLS
   const category = CATEGORIES.find((c) => c.id === tab)!
 
   return (
     <Box component="section" sx={{ mb: 4 }} aria-labelledby="guidelines-title">
-      {/* Header: title, the three principles, and the tool filter. */}
+      {/* Header: title and the three principles. */}
       <Paper
         variant="outlined"
         sx={{
@@ -495,66 +347,10 @@ export function WorkingGuidelines() {
             </Stack>
           </Box>
         </Stack>
-
-        <Stack
-          direction={{ xs: 'column', md: 'row' }}
-          spacing={1.5}
-          sx={{ mt: 2.5, pt: 2, borderTop: 1, borderColor: (t) => alpha(t.palette.primary.main, 0.15) }}
-        >
-          <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1, alignItems: 'center', flexGrow: 1 }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, mr: 0.5 }}>
-              Filter by tool
-            </Typography>
-            {[null, ...TOOLS.map((t) => t.id)].map((id) => {
-              const tool = TOOLS.find((t) => t.id === id)
-              const on = filter === id
-              return (
-                <Chip
-                  key={id ?? 'all'}
-                  component="button"
-                  aria-pressed={on}
-                  label={tool?.short ?? 'All tools'}
-                  icon={tool?.icon}
-                  size="small"
-                  onClick={() => pick(id)}
-                  sx={{
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    border: 1,
-                    borderColor: on ? 'transparent' : 'divider',
-                    bgcolor: on ? (tool?.ink ?? 'primary.main') : '#fff',
-                    color: on ? '#fff' : 'text.primary',
-                    '& .MuiChip-icon': { color: on ? '#fff' : tool?.ink, fontSize: 16 },
-                    '&:hover': { bgcolor: on ? (tool?.ink ?? 'primary.main') : 'grey.100' },
-                  }}
-                />
-              )
-            })}
-          </Stack>
-          <Button size="small" endIcon={<ArrowDownwardIcon />} onClick={jumpToNorms} sx={{ alignSelf: { md: 'center' } }}>
-            Detailed norms
-          </Button>
-        </Stack>
       </Paper>
 
-      {/* The 60-second cheat sheet. */}
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1.5 }}>
-        <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 700 }}>
-          The 60-second cheat sheet
-        </Typography>
-        <Chip label="⏱ Quick reference" size="small" variant="outlined" />
-      </Stack>
-      <Stack spacing={1.5} sx={{ mb: 4 }}>
-        {shownTools.map((t) => (
-          <CheatRow key={t.id} tool={t} />
-        ))}
-      </Stack>
-
       {/* The detailed norms, a tab per area. */}
-      <Box ref={normsRef} sx={{ scrollMarginTop: 80 }}>
-        <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 700, mb: 1 }}>
-          Detailed operational norms
-        </Typography>
+      <Box>
         <Tabs
           value={tab}
           onChange={(_, v: CategoryId) => setTab(v)}

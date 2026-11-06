@@ -453,12 +453,13 @@ create table public.announcements (
 
 -- ---------------------------------------------------------------------------
 -- Guides: the per-function docs on the Resources page. An employee reads only
--- those of their own department's business function; company admins read all.
--- Kept from the Supabase dashboard; the app only reads them.
+-- those of their own department's business function; company admins read all
+-- and manage them (Configuration → Guides).
 -- ---------------------------------------------------------------------------
 create table public.guides (
   id                uuid primary key default gen_random_uuid(),
-  -- Its address on the Resources page: /resources/guides/<slug>.
+  -- Its address on the Resources page: /resources/guides/<slug>. Set on
+  -- insert, never updated (no grant), so the address stays put.
   slug              text not null unique check (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
   title             text not null check (title = trim(title) and title <> ''),
   description       text,
@@ -4041,8 +4042,10 @@ grant select, update (rating) on public.manager_feedback_answers to authenticate
 
 grant select on public.employee_directory to authenticated;
 
--- Read only: the guides are kept from the Supabase dashboard.
-grant select on public.guides to authenticated;
+-- Company admins manage the guides (RLS); the slug is set only on insert.
+grant select, delete on public.guides to authenticated;
+grant insert (slug, title, description, business_function, doc_url, sort_order) on public.guides to authenticated;
+grant update (title, description, business_function, doc_url, sort_order) on public.guides to authenticated;
 
 revoke execute on function
   public.is_login_status(public.employee_status), public.current_employee_id(),
@@ -4365,6 +4368,12 @@ create policy announcements_delete on public.announcements for delete to authent
 create policy guides_select on public.guides for select to authenticated
   using ((select public.is_company_admin())
          or business_function = (select public.current_business_function()));
+create policy guides_insert on public.guides for insert to authenticated
+  with check ((select public.is_company_admin()));
+create policy guides_update on public.guides for update to authenticated
+  using ((select public.is_company_admin())) with check ((select public.is_company_admin()));
+create policy guides_delete on public.guides for delete to authenticated
+  using ((select public.is_company_admin()));
 
 -- The checklist: HR reads it, company admins change it.
 create policy onboarding_template_sections_select on public.onboarding_template_sections

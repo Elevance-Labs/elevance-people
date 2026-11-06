@@ -2,14 +2,14 @@
 // The database decides who reads which announcement (RLS: HR all, everyone
 // else only those pinned today); these checks prove the dashboard asks only
 // for pinned bodies and that HR's page sends exactly what it should.
-import { setupDom, reporter, text, button, click, dialog, settle, valueOf, waitFor, freezeToday, navLabels } from './setup'
+import { setupDom, reporter, text, button, click, choose, dialog, settle, type, valueOf, waitFor, freezeToday, navLabels } from './setup'
 setupDom()
 freezeToday('2026-06-10')
 
 const { mountApp, location } = await import('./app')
 const { reset, signInAs, captured, failNext, table, PEOPLE } = await import('./mockSupabase')
 const { HANDBOOK_EMBED_URL, HANDBOOK_URL } = await import('../src/lib/constants')
-const { guideUrls } = await import('../src/lib/guides')
+const { guideUrls, guideSlug, isGoogleDocUrl, isPublishedDocUrl } = await import('../src/lib/guides')
 
 const { check, done } = reporter()
 
@@ -260,39 +260,26 @@ check('it opens on Work ethics, with a tab for my own function\'s guides only',
   pageTabs().map((t) => t.textContent).join() === 'Work ethics,Production guides' &&
   pageTab('Work ethics')?.getAttribute('aria-selected') === 'true', pageTabs().map((t) => t.textContent).join())
 const guide = () => section('Remote Work & Collaboration Guidelines')!
-const cheatRows = () => [...guide().querySelectorAll('article')].map((a) => a.querySelector('h4')?.textContent)
 const selectedNorms = () => guide().querySelector('[role="tab"][aria-selected="true"]')?.textContent
 const panel = () => guide().querySelector('[role="tabpanel"]')?.textContent ?? ''
 check('the guidelines lead with focus, transparency and async clarity',
   guide().textContent?.includes('Respect for focus, transparency, and async clarity'))
-check('the cheat sheet has a golden rule and an anti-pattern for each of the five tools',
-  cheatRows().join() === 'Google Chat,Google Calendar,Google Docs & Workspace,Jira,Google Meet' &&
-  [...guide().querySelectorAll('article')].every((a) =>
-    a.textContent?.includes('Golden rule:') && a.textContent?.includes('Anti-pattern:')),
-  cheatRows().join())
-check('the detailed norms open on Google Chat, with its rule of thumb and examples',
+check('after the banner come only the norm tabs: no tool filter, no cheat sheet',
+  !guide().textContent?.includes('Filter by tool') && !guide().textContent?.includes('cheat sheet') &&
+  !guide().textContent?.includes('Golden rule:') && !guide().querySelector('article') && !button('Detailed norms', guide()))
+check('the norms open on Google Chat, with its rule of thumb and examples',
   selectedNorms() === 'Google Chat' && panel().includes('Rule of thumb') &&
   panel().includes('Avoid the isolated "Hi"') && panel().includes('Do:') && panel().includes("Don't:"), panel())
 check('…in four areas',
   [...guide().querySelectorAll('[role="tab"]')].map((t) => t.textContent).join() ===
     'Google Chat,Calendar & Meet,Docs & Workspace,Jira & async')
-
-await click(button('Jira', guide()))
-check('filtering by a tool shows only its cheat-sheet row', cheatRows().join() === 'Jira', cheatRows().join())
-check('…marks the filter on', button('Jira', guide())?.getAttribute('aria-pressed') === 'true')
-check('…and opens its detailed norms', selectedNorms() === 'Jira & async' && panel().includes('To DoIn ProgressIn ReviewDone'),
+const normsTab = (label: string) => [...guide().querySelectorAll('[role="tab"]')].find((t) => t.textContent === label)
+await click(normsTab('Jira & async'))
+check('a tab opens its norms', selectedNorms() === 'Jira & async' && panel().includes('To DoIn ProgressIn ReviewDone'),
   selectedNorms())
-await click(button('Meet', guide()))
-check('Meet opens the Calendar & Meet norms', cheatRows().join() === 'Google Meet' && selectedNorms() === 'Calendar & Meet' &&
-  panel().includes('Instant Meets for quick blockers'), selectedNorms())
-await click(button('All tools', guide()))
-check('All tools brings every row back, leaving the tab where it was',
-  cheatRows().length === 5 && selectedNorms() === 'Calendar & Meet')
-await click([...guide().querySelectorAll('[role="tab"]')].find((t) => t.textContent === 'Docs & Workspace'))
-check('a tab can be picked directly; sharing names the company',
+await click(normsTab('Docs & Workspace'))
+check('…and sharing names the company',
   selectedNorms() === 'Docs & Workspace' && panel().includes('Anyone in Elevance Labs with the link can comment'), panel())
-await click(button('Detailed norms', guide()))
-check('the jump to the norms stays on the page', location.pathname === '/resources', location.pathname)
 const fnRead = captured.selects.find((s) => s.table === 'departments')
 check('my function is read from my department',
   fnRead?.columns === 'business_function' && JSON.stringify(fnRead.filters) === JSON.stringify([['id', 'eq', 'd-eng']]),
@@ -365,9 +352,9 @@ const guideFrame = document.querySelector('main iframe')
 const guideRead = captured.selects.filter((s) => s.table === 'guides').at(-1)
 check('a guide\'s page reads it by slug',
   JSON.stringify(guideRead?.filters) === JSON.stringify([['slug', 'eq', 'engineering']]), JSON.stringify(guideRead))
-check('…and embeds the doc\'s read-only view',
+check('…and embeds the doc\'s own view, where commenters can comment',
   location.pathname === '/resources/guides/engineering' &&
-  guideFrame?.getAttribute('src') === 'https://docs.google.com/document/d/abc-123_X/preview' &&
+  guideFrame?.getAttribute('src') === 'https://docs.google.com/document/d/abc-123_X/edit' &&
   guideFrame?.getAttribute('title') === 'Engineering', guideFrame?.getAttribute('src'))
 const openDoc = button('Open in Google Docs')
 check('…links to the doc in a new tab, and back to its function',
@@ -388,12 +375,84 @@ check('…as does one the database doesn\'t return', await waitFor(() => locatio
 check('a doc published to the web is framed embedded',
   JSON.stringify(guideUrls('https://docs.google.com/document/d/e/2PACX-1v/pub')) ===
     JSON.stringify({ open: 'https://docs.google.com/document/d/e/2PACX-1v/pub', embed: 'https://docs.google.com/document/d/e/2PACX-1v/pub?embedded=true' }))
-check('a Sheet or Slides shared by link is framed through /preview',
-  guideUrls('https://docs.google.com/spreadsheets/d/s1/edit#gid=0').embed === 'https://docs.google.com/spreadsheets/d/s1/preview' &&
-  guideUrls('https://docs.google.com/presentation/d/p1/edit').embed === 'https://docs.google.com/presentation/d/p1/preview')
+check('a Sheet or Slides shared by link is framed through /edit, so commenters can comment',
+  guideUrls('https://docs.google.com/spreadsheets/d/s1/edit#gid=0').embed === 'https://docs.google.com/spreadsheets/d/s1/edit' &&
+  guideUrls('https://docs.google.com/presentation/d/p1/view?usp=sharing').embed === 'https://docs.google.com/presentation/d/p1/edit')
+check('a new guide\'s address comes from its title, never one already taken',
+  guideSlug('  Sales & Marketing Playbook! ', []) === 'sales-marketing-playbook' &&
+  guideSlug('Engineering', ['engineering', 'engineering-2']) === 'engineering-3' && guideSlug('???', []) === 'guide')
+check('the form takes Google Docs, Sheets and Slides links, and knows a published one',
+  isGoogleDocUrl('https://docs.google.com/document/d/abc/edit') && isGoogleDocUrl('https://docs.google.com/presentation/d/e/2PACX/pub') &&
+  !isGoogleDocUrl('https://docs.google.com/forms/d/abc') && !isGoogleDocUrl('https://example.com/doc') &&
+  isPublishedDocUrl('https://docs.google.com/document/d/e/2PACX/pub') && !isPublishedDocUrl('https://docs.google.com/document/d/abc/edit'))
 check('a published Sheet, or any other link, is framed as it is',
   guideUrls('https://docs.google.com/spreadsheets/d/e/2PACX/pubhtml').embed === 'https://docs.google.com/spreadsheets/d/e/2PACX/pubhtml' &&
   guideUrls('https://example.com/guide').embed === 'https://example.com/guide')
+
+// ---------------- Configuration → Guides ----------------
+const guideRows = () => [...document.querySelectorAll('main tbody tr')].map((r) => r.textContent ?? '')
+const lastGuideInsert = () => captured.inserts.filter((i) => i.table === 'guides').at(-1)?.rows[0]
+const lastGuideUpdate = () => captured.updates.filter((u) => u.table === 'guides').at(-1)
+
+reset()
+signInAs(PEOPLE.companyAdmin)
+await mountApp('/configuration/guides')
+await waitFor(() => guideRows().length === 4)
+check('a company admin sees every guide, by function then order, with its doc or coming soon',
+  guideRows().map((r) => r.split('About')[0]).join() === 'Design,Engineering,Sales,HR' &&
+  guideRows()[0].includes('Coming soon') && button('Open Engineering in Google')?.getAttribute('target') === '_blank',
+  guideRows().join(' / '))
+
+await click(button('Add guide'))
+await type('Title', '  Engineering  ', dialog()!)
+await type('Google Docs link', 'https://example.com/doc', dialog()!)
+await click(button('Add', dialog()!))
+check('a guide with no function is refused before anything is sent', !lastGuideInsert() && !!dialog())
+await choose('Business function', 'Production', dialog()!)
+await click(button('Add', dialog()!))
+check('…as is a link that isn\'t a Google Doc, Sheet or Slides',
+  dialog()?.textContent?.includes('Enter a Google Docs, Sheets or Slides link') && !lastGuideInsert(), dialog()?.textContent)
+await type('Google Docs link', 'https://docs.google.com/document/d/e/2PACX/pub', dialog()!)
+check('a published link is flagged as unable to take comments', dialog()?.textContent?.includes('nobody can comment'))
+await type('Google Docs link', ' https://docs.google.com/document/d/new-doc/edit?usp=sharing ', dialog()!)
+await click(button('Add', dialog()!))
+check('adding sends the title, function and link, with an address made from the title and not one taken',
+  JSON.stringify(lastGuideInsert()) === JSON.stringify({
+    title: 'Engineering', business_function: 'production',
+    doc_url: 'https://docs.google.com/document/d/new-doc/edit?usp=sharing', description: null, sort_order: 0,
+    slug: 'engineering-2',
+  }) && await waitFor(() => !dialog()), JSON.stringify(lastGuideInsert()))
+check('…and it is listed', await waitFor(() => guideRows().length === 5), guideRows().join(' / '))
+
+await click(button('Edit Design'))
+check('editing starts from the guide as it is', valueOf('Title', dialog()!) === 'Design' && valueOf('Order', dialog()!) === '1')
+await type('Title', 'Design system', dialog()!)
+await type('Google Docs link', '', dialog()!)
+await type('Order', '1.5', dialog()!)
+await click(button('Save', dialog()!))
+check('the order must be a whole number', dialog()?.textContent?.includes('whole number'), dialog()?.textContent)
+await type('Order', '3', dialog()!)
+await click(button('Save', dialog()!))
+check('editing sends the changes but never the address, and an empty link is coming soon',
+  JSON.stringify(lastGuideUpdate()) === JSON.stringify({
+    table: 'guides',
+    values: { title: 'Design system', business_function: 'production', doc_url: null, description: 'About design.', sort_order: 3 },
+    filters: [['id', 'eq', 'gd-design']],
+  }), JSON.stringify(lastGuideUpdate()))
+
+failNext('guides.update', { code: '42501', message: 'permission denied' })
+await click(button('Edit Sales'))
+await click(button('Save', dialog()!))
+check('a refusal from the database is explained', dialog()?.textContent?.includes('Only a company admin can manage guides'),
+  dialog()?.textContent)
+await click(button('Cancel', dialog()!))
+
+await click(button('Delete HR'))
+check('deleting asks first, and says the doc itself is kept', dialog()?.textContent?.includes('The Google Doc itself is not touched'))
+await click(button('Delete', dialog()!))
+check('…then deletes just that guide',
+  JSON.stringify(captured.deletes.at(-1)) === JSON.stringify({ table: 'guides', filters: [['id', 'eq', 'gd-hr']] }) &&
+  await waitFor(() => !guideRows().some((r) => r.startsWith('HR'))), JSON.stringify(captured.deletes.at(-1)))
 
 // ============================== handbook and profile ==============================
 reset()

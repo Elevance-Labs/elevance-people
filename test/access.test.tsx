@@ -149,6 +149,7 @@ for (const path of [
   '/configuration/onboarding', '/configuration/offboarding', '/hr/offboarding/off-sara', '/finance/payroll', '/finance/payroll/pr-may',
   '/operations/equipment', '/operations/equipment/new', '/operations/equipment/eq-laptop', '/configuration/vendors',
   '/company/expectations', '/performance/people/e-amna', '/finance/reimbursements', '/reimbursements',
+  '/configuration/guides',
 ]) {
   reset()
   offHiringTeam()
@@ -258,6 +259,11 @@ check('HR sent to the onboarding checklist ends up on the dashboard', location.p
 
 reset()
 signInAs(PEOPLE.hr)
+await mountApp('/configuration/guides')
+check('HR sent to the guides set-up ends up on the dashboard', location.pathname === '/dashboard', location.pathname)
+
+reset()
+signInAs(PEOPLE.hr)
 await mountApp('/finance/payroll')
 check('HR reaches payroll', location.pathname === '/finance/payroll' && text().includes('May 2026'), location.pathname)
 
@@ -280,7 +286,7 @@ check('a company admin is offered everything',
   navLabels().join() ===
     'Dashboard,Handbook,Resources,Profile,My leaves,My reimbursements,Employees,Org chart,Performance,Appraisals,Leave requests,Job openings,' +
       'Applications,Onboarding,Offboarding,Payroll,Reimbursements,Equipment,Departments,Designations,KPIs,Expectations,Leaves,Holidays,Announcements,Branding,' +
-      'Onboarding,Offboarding,Vendors',
+      'Onboarding,Offboarding,Vendors,Guides',
   navLabels().join())
 
 // ---------------- finance admin ----------------

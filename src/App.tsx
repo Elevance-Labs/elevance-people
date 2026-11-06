@@ -37,6 +37,7 @@ import MyReimbursements from './pages/finance/MyReimbursements'
 import EquipmentList from './pages/operations/Equipment'
 import EquipmentForm from './pages/operations/EquipmentForm'
 import Vendors from './pages/configuration/Vendors'
+import Guides from './pages/configuration/Guides'
 import Performance from './pages/performance/Performance'
 import PerformanceReview from './pages/performance/Review'
 import PerformancePerson from './pages/performance/Person'
@@ -153,6 +154,7 @@ function SignedIn() {
             <Route path="/company/branding" element={<Branding />} />
             <Route path="/configuration/onboarding" element={<Checklist key="onboarding" kind="onboarding" />} />
             <Route path="/configuration/offboarding" element={<Checklist key="offboarding" kind="offboarding" />} />
+            <Route path="/configuration/guides" element={<Guides />} />
           </>
         )}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

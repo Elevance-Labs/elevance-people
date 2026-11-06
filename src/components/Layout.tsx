@@ -28,6 +28,7 @@ import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined'
 import CelebrationOutlinedIcon from '@mui/icons-material/CelebrationOutlined'
 import ChecklistOutlinedIcon from '@mui/icons-material/ChecklistOutlined'
 import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined'
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import DevicesOutlinedIcon from '@mui/icons-material/DevicesOutlined'
 import EventAvailableOutlinedIcon from '@mui/icons-material/EventAvailableOutlined'
 import EventNoteOutlinedIcon from '@mui/icons-material/EventNoteOutlined'
@@ -161,6 +162,7 @@ const NAV: NavSection[] = [
       { to: '/configuration/onboarding', label: 'Onboarding', icon: <ChecklistOutlinedIcon />, companyAdminOnly: true },
       { to: '/configuration/offboarding', label: 'Offboarding', icon: <PlaylistRemoveOutlinedIcon />, companyAdminOnly: true },
       { to: '/configuration/vendors', label: 'Vendors', icon: <StorefrontOutlinedIcon />, operationsOnly: true },
+      { to: '/configuration/guides', label: 'Guides', icon: <DescriptionOutlinedIcon />, companyAdminOnly: true },
     ],
   },
 ]

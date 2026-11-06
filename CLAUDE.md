@@ -23,7 +23,8 @@ behaviour).
   reimbursements),
   **operations** (equipment and its assignments), **company settings**
   (departments, designations, KPIs, expectations, holidays, announcements, branding), and
-  **configuration** (the onboarding and offboarding checklists, vendors).
+  **configuration** (the onboarding and offboarding checklists, vendors, the
+  Resources guides).
 - Stack: **React 19 + Vite + MUI + TypeScript** on the front, **Supabase**
   (Postgres + RLS, Auth, Storage) behind it. No backend of our own; one Edge
   Function (`set-password`, deployed by hand).
@@ -118,7 +119,7 @@ behaviour).
 | `src/pages/finance/` | Finance pages: payroll list and one payroll, reimbursements (HR, finance admins, company admins); my reimbursements (whoever HR allows to claim). |
 | `src/pages/operations/` | Operations pages (HR, finance admins, company admins): equipment list and one item. |
 | `src/pages/performance/` | Performance: the tabbed page (Me, My team, People), one review, one person's history. |
-| `src/pages/configuration/` | Configuration pages: the onboarding and offboarding checklists (one page, by kind; company admins); vendors (HR, finance admins, company admins). |
+| `src/pages/configuration/` | Configuration pages: the onboarding and offboarding checklists (one page, by kind; company admins); vendors (HR, finance admins, company admins); guides (company admins). |
 | `src/pages/public/` | Pages served without sign-in (the public job page). |
 | `src/components/` | Shared UI: app shell, documents panel, rich text, small common pieces. |
 | `src/theme.ts` | MUI theme, and the branded variant the public page uses. |
@@ -152,7 +153,8 @@ behaviour).
   collaboration guidelines, static, in `components/WorkingGuidelines.tsx`),
   then the viewer's own business function's guides (company admins: a tab
   per function); tab in `?tab=`. `/resources/guides/:slug` — one guide's doc
-  in an iframe; back to Resources if RLS hides it or it has no link.
+  in an iframe (a shared link through its `/edit` view, so Google commenters
+  can comment); back to Resources if RLS hides it or it has no link.
 - `/handbook` — everyone: the Google Doc handbook in an iframe (its `/preview`
   URL, from `constants.ts`). `/profile` — everyone: own record, read-only (RLS: a member reads only their own row); tabs *Profile*, *Equipment* (own equipment via `my_equipment`: name, identifier, date), *Salary* (own approved salaries via `my_salaries`: current, then history), *Payslips* (own disbursed payroll lines via `my_payslips`; breakdown dialog and PDF), tab kept in `?tab=`.
 - `/employees` — HR list of employee records. HR only.
@@ -215,7 +217,8 @@ behaviour).
 - `/configuration/vendors` — HR, finance admins, company admins: add, edit;
   delete is company-admin only.
 - `/company/departments`, `/company/designations`, `/company/branding`,
-  `/configuration/onboarding`, `/configuration/offboarding` —
+  `/configuration/onboarding`, `/configuration/offboarding`,
+  `/configuration/guides` (add, edit, delete the Resources guides) —
   company admins only. The checklists filter by department in `?department=`
   (its sections and everyone's).
 - `/company/leaves` — HR: tabs *Types* (default yearly quota per type) and
@@ -296,8 +299,9 @@ behaviour).
   messages.
 - `passwordLogin.ts` — password minimum (mirror of the function's), the
   password generator, and calling `set-password` with its error message.
-- `guides.ts` — guide select, function summaries, and turning a Google
-  Docs / Sheets / Slides link into its embeddable address.
+- `guides.ts` — guide select, function summaries, turning a Google
+  Docs / Sheets / Slides link into its embeddable address, the link check,
+  a new guide's slug, error messages.
 - `richText.ts` — DOMPurify allow-list sanitiser and styles shared by the
   editor and the view.
 - `company.tsx` — helpers for the config pages: embedded-count reading, the
@@ -529,9 +533,10 @@ Full detail in `supabase/schema.sql`.
   reads, company admins update; anon gets only logo, colour and perks via
   `public_branding`. Logo in the public `branding` bucket.
 - `guides` — one per doc: slug, title, function, optional Google link,
-  order. Read only from the app (no write grants; kept from the Supabase
-  dashboard); RLS: company admins all, everyone else only
-  `current_business_function()` — their department's.
+  order. Company admins write them (RLS; the slug only on insert, no
+  update grant); reads: company admins all, everyone else only
+  `current_business_function()` — their department's. Who may comment on a
+  doc is Google's sharing, not ours.
 - `announcements` — rich-text body, optional `pinned_until` date, author
   stamped by trigger. Everyone signed in reads all (RLS); HR writes. The
   dashboard shows pinned ones (body only) and the drawer the rest.
