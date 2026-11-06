@@ -142,7 +142,8 @@ behaviour).
   write, feedback on one's manager at the current 1:1, HR: a quarter with no
   peer reviews), own scores (*My performance*: performance, KPI and
   expectation scores, each KPI's and expectation's average over own submitted
-  reviews), pinned announcements (body
+  reviews; the designation's current KPIs and expectations always listed,
+  unscored until rated), pinned announcements (body
   only; *View all* opens the drawer in `components/Announcements.tsx` with the
   last 4 months'), offboarding reminders (HR and managers: to sign off; managers: a
   report leaving), appraisals to approve (company admins), own leave balance and upcoming leave, upcoming holidays, then the company values
@@ -480,8 +481,9 @@ Full detail in `supabase/schema.sql`.
   `performance_review_expectations`) — one per employee and reviewed month
   (`period`, first day), due the 10th of the next month (generated).
   `review_start` (the org-chart manager, a month that is over, someone who
-  may log in and had joined) copies the designation's KPIs and expectations
-  in. While a draft, the current manager updates evaluation, feedback, goal
+  may log in and had joined); `review_sync` keeps a draft's KPIs and
+  expectations in line with the designation's (triggers on KPI / expectation
+  and designation changes; ratings kept). While a draft, the current manager updates evaluation, feedback, goal
   and ratings (RLS + column grants). `review_submit` checks completeness and
   order (earlier drafts first), keeps or clears the goal fields by the goal
   rule (`review_goal_quarter`; one goal per person and quarter, partial

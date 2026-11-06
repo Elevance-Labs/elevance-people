@@ -124,22 +124,36 @@ export const formatScore = (score: number | null) => (score == null ? '—' : sc
 // if that is gone.
 export const lineKey = (id: string | null, name: string) => id ?? `name:${name}`
 
-export type LineAverage = { key: string; name: string; average: number; count: number }
+// A KPI's or expectation's average across reviews; null (count 0) when it has
+// not been scored yet.
+export type LineAverage = { key: string; name: string; average: number | null; count: number }
+
+// The KPIs and expectations the person's designation has now.
+export type CurrentLines = { kpis: { id: string; name: string }[]; expectations: { id: string; title: string }[] }
 
 /**
  * Submitted reviews summed up: each KPI's average rating out of 5 and each
- * expectation's share met (0–1), in the newest review's order first; the KPI
- * score (the average of each review's overall score), the performance score
- * (that as a percentage of 5) and the expectation score (percent of all
- * expectations met).
+ * expectation's share met (0–1); the KPI score (the average of each review's
+ * overall score), the performance score (that as a percentage of 5) and the
+ * expectation score (percent of all expectations met). The designation's
+ * current KPIs and expectations come first, in the review form's order,
+ * scored or not; then any others scored before, in the newest review's order.
  */
-export function scoreSummary(reviews: Pick<ReviewWithLines, 'period' | 'status' | 'kpis' | 'expectations'>[]) {
+export function scoreSummary(
+  reviews: Pick<ReviewWithLines, 'period' | 'status' | 'kpis' | 'expectations'>[],
+  current: CurrentLines = { kpis: [], expectations: [] },
+) {
   const submitted = reviews
     .filter((r) => r.status === 'submitted')
     .sort((a, b) => b.period.localeCompare(a.period))
-  const kpis = new Map<string, { name: string; sum: number; count: number }>()
-  const expectations = new Map<string, { name: string; sum: number; count: number }>()
-  const add = (map: typeof kpis, key: string, name: string, value: number) => {
+  type Sum = { name: string; sum: number; count: number }
+  const byName = <T,>(rows: T[], name: (r: T) => string) =>
+    [...rows].sort((a, b) => name(a).toLowerCase().localeCompare(name(b).toLowerCase()))
+  const kpis = new Map<string, Sum>(byName(current.kpis, (k) => k.name).map((k) => [k.id, { name: k.name, sum: 0, count: 0 }]))
+  const expectations = new Map<string, Sum>(
+    byName(current.expectations, (x) => x.title).map((x) => [x.id, { name: x.title, sum: 0, count: 0 }]),
+  )
+  const add = (map: Map<string, Sum>, key: string, name: string, value: number) => {
     const row = map.get(key) ?? { name, sum: 0, count: 0 }
     map.set(key, { name: row.name, sum: row.sum + value, count: row.count + 1 })
   }
@@ -149,8 +163,8 @@ export function scoreSummary(reviews: Pick<ReviewWithLines, 'period' | 'status' 
     for (const x of [...r.expectations].sort((a, b) => a.sort_order - b.sort_order))
       if (x.met != null) add(expectations, lineKey(x.expectation_id, x.title), x.title, x.met ? 1 : 0)
   }
-  const averages = (map: typeof kpis): LineAverage[] =>
-    [...map].map(([key, { name, sum, count }]) => ({ key, name, average: sum / count, count }))
+  const averages = (map: Map<string, Sum>): LineAverage[] =>
+    [...map].map(([key, { name, sum, count }]) => ({ key, name, average: count ? sum / count : null, count }))
 
   const overall = submitted.map((r) => overallScore(r.kpis)).filter((s): s is number => s != null)
   const kpiScore = overall.length ? overall.reduce((a, b) => a + b, 0) / overall.length : null

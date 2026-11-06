@@ -36,6 +36,7 @@ import {
   reviewState,
   scoreSummary,
   shortMonthLabel,
+  type CurrentLines,
   type ReviewState,
   type ReviewWithLines,
 } from '../lib/performance'
@@ -345,8 +346,10 @@ export function PerformanceReport({ reviews }: { reviews: ReviewWithLines[] }) {
   )
 }
 
-// One KPI's or expectation's average, with a bar out of the most it can be.
-function AverageRow({ name, value, percent, detail }: { name: string; value: string; percent: number; detail: string }) {
+// One KPI's or expectation's average, with a bar out of the most it can be;
+// not scored yet, the same row with a dash and an empty bar.
+function AverageRow({ name, value, percent, detail }: { name: string; value?: string; percent?: number; detail: string }) {
+  const shown = value ?? '—'
   return (
     <Box sx={{ px: 2, py: 1.25 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: 'baseline', mb: 0.75 }}>
@@ -354,10 +357,10 @@ function AverageRow({ name, value, percent, detail }: { name: string; value: str
           {name}
         </Typography>
         <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-          {value}
+          {shown}
         </Typography>
       </Stack>
-      <LinearProgress variant="determinate" value={percent} aria-label={`${name}: ${value}, ${detail}`} />
+      <LinearProgress variant="determinate" value={percent ?? 0} aria-label={`${name}: ${shown}, ${detail}`} />
       <Typography variant="caption" sx={{ color: 'text.secondary' }}>
         {detail}
       </Typography>
@@ -366,15 +369,18 @@ function AverageRow({ name, value, percent, detail }: { name: string; value: str
 }
 
 const reviewCount = (n: number) => (n === 1 ? '1 review' : `${n} reviews`)
+const NOT_SCORED = 'Not scored yet'
+const NO_REVIEWS = 'No submitted reviews yet'
 
 /**
  * Scores across every submitted review: the performance score, the KPI and
  * expectation scores, then each KPI's average rating and each expectation's
- * share met.
+ * share met. The designation's current KPIs and expectations always show,
+ * without a score until one is given.
  */
-export function ScoreSummary({ reviews }: { reviews: ReviewWithLines[] }) {
-  const s = scoreSummary(reviews)
-  if (!s.reviews) {
+export function ScoreSummary({ reviews, current }: { reviews: ReviewWithLines[]; current?: CurrentLines }) {
+  const s = scoreSummary(reviews, current)
+  if (!s.reviews && !s.kpis.length && !s.expectations.length) {
     return (
       <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
         <Typography variant="body2">No scores yet. They show here once your manager submits a monthly review.</Typography>
@@ -395,14 +401,14 @@ export function ScoreSummary({ reviews }: { reviews: ReviewWithLines[] }) {
           <StatTile
             label="KPI score"
             value={`${formatScore(s.kpiScore)} / 5`}
-            detail={`Average over ${reviewCount(s.reviews)}`}
+            detail={s.reviews ? `Average over ${reviewCount(s.reviews)}` : NO_REVIEWS}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 4 }}>
           <StatTile
             label="Expectation score"
             value={s.expectationScore == null ? '—' : `${s.expectationScore}%`}
-            detail={`Expectations met over ${reviewCount(s.reviews)}`}
+            detail={s.reviews ? `Expectations met over ${reviewCount(s.reviews)}` : NO_REVIEWS}
           />
         </Grid>
       </Grid>
@@ -412,18 +418,22 @@ export function ScoreSummary({ reviews }: { reviews: ReviewWithLines[] }) {
             <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, px: 2, pt: 1.5 }}>
               KPIs
             </Typography>
-            {s.kpis.map((k) => (
-              <AverageRow
-                key={k.key}
-                name={k.name}
-                value={`${formatScore(k.average)} / 5`}
-                percent={(k.average / 5) * 100}
-                detail={`Average of ${reviewCount(k.count)}`}
-              />
-            ))}
+            {s.kpis.map((k) =>
+              k.average == null ? (
+                <AverageRow key={k.key} name={k.name} detail={NOT_SCORED} />
+              ) : (
+                <AverageRow
+                  key={k.key}
+                  name={k.name}
+                  value={`${formatScore(k.average)} / 5`}
+                  percent={(k.average / 5) * 100}
+                  detail={`Average of ${reviewCount(k.count)}`}
+                />
+              ),
+            )}
             {!s.kpis.length && (
               <Typography variant="body2" sx={{ px: 2, py: 1.5, color: 'text.secondary' }}>
-                No KPIs rated.
+                No KPIs set.
               </Typography>
             )}
           </Paper>
@@ -433,18 +443,22 @@ export function ScoreSummary({ reviews }: { reviews: ReviewWithLines[] }) {
             <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, px: 2, pt: 1.5 }}>
               Expectations
             </Typography>
-            {s.expectations.map((x) => (
-              <AverageRow
-                key={x.key}
-                name={x.name}
-                value={`${Math.round(x.average * 100)}%`}
-                percent={x.average * 100}
-                detail={`Met in ${Math.round(x.average * x.count)} of ${reviewCount(x.count)}`}
-              />
-            ))}
+            {s.expectations.map((x) =>
+              x.average == null ? (
+                <AverageRow key={x.key} name={x.name} detail={NOT_SCORED} />
+              ) : (
+                <AverageRow
+                  key={x.key}
+                  name={x.name}
+                  value={`${Math.round(x.average * 100)}%`}
+                  percent={x.average * 100}
+                  detail={`Met in ${Math.round(x.average * x.count)} of ${reviewCount(x.count)}`}
+                />
+              ),
+            )}
             {!s.expectations.length && (
               <Typography variant="body2" sx={{ px: 2, py: 1.5, color: 'text.secondary' }}>
-                No expectations marked.
+                No expectations set.
               </Typography>
             )}
           </Paper>

@@ -5,7 +5,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { supabase } from '../../lib/supabase'
 import { formatDate, formatDateRange, formatDays } from '../../lib/constants'
 import { HOLIDAY_COLUMNS, LEAVE_WITH_TYPE, thisYear, todayIso, type LeaveWithType } from '../../lib/leaves'
-import { currentCycle, monthLabel, type ReviewWithLines } from '../../lib/performance'
+import { currentCycle, monthLabel, type CurrentLines, type ReviewWithLines } from '../../lib/performance'
 import { ASSIGNMENT_WITH_CYCLE, cycleLabel, quarterOf, type AssignmentWithCycle } from '../../lib/peerReviews'
 import { OFFBOARDING_LIST, signOffOf, type OffboardingListRow } from '../../lib/offboarding'
 import type { Announcement, Holiday, LeaveBalance, OrgNode, PerformanceReview, ReviewDue, OneOnOne } from '../../lib/types'
@@ -199,7 +199,8 @@ function PerformanceNotices() {
 }
 
 // The person's scores across every submitted review of them (RLS: their own
-// reviews only once submitted).
+// reviews only once submitted), alongside their designation's current KPIs
+// and expectations, which show even before they are scored.
 const MY_SCORES =
   'period, status, kpis:performance_review_kpis(kpi_id, name, weight, rating, sort_order), ' +
   'expectations:performance_review_expectations(expectation_id, title, met, sort_order)'
@@ -207,7 +208,9 @@ const MY_SCORES =
 function MyPerformance() {
   const { employee } = useAuth()
   const me = employee!.id
+  const designation = employee!.designation_id
   const [reviews, setReviews] = useState<ReviewWithLines[] | null>(null)
+  const [current, setCurrent] = useState<CurrentLines>({ kpis: [], expectations: [] })
 
   useEffect(() => {
     supabase
@@ -217,6 +220,14 @@ function MyPerformance() {
       .eq('status', 'submitted')
       .then(({ data, error }) => setReviews(error ? null : ((data ?? []) as unknown as ReviewWithLines[])))
   }, [me])
+
+  useEffect(() => {
+    if (!designation) return
+    Promise.all([
+      supabase.from('kpis').select('id, name').eq('designation_id', designation),
+      supabase.from('expectations').select('id, title').eq('designation_id', designation),
+    ]).then(([k, x]) => setCurrent({ kpis: k.error ? [] : (k.data ?? []), expectations: x.error ? [] : (x.data ?? []) }))
+  }, [designation])
 
   if (!reviews) return null
   return (
@@ -228,7 +239,7 @@ function MyPerformance() {
         </Button>
       }
     >
-      <ScoreSummary reviews={reviews} />
+      <ScoreSummary reviews={reviews} current={current} />
     </Section>
   )
 }

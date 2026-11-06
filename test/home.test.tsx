@@ -108,8 +108,60 @@ reset()
 signInAs(PEOPLE.member)
 table('performance_reviews').forEach((r) => (r.status = 'draft'))
 await mountApp('/dashboard')
-check('a draft review gives no score', section('My performance')?.textContent?.includes('No scores yet.'),
-  section('My performance')?.textContent)
+{
+  const p = section('My performance')
+  const kpis = p?.querySelector('[aria-label="KPIs"]')?.textContent ?? ''
+  const exps = p?.querySelector('[aria-label="Expectations"]')?.textContent ?? ''
+  const t = (label: string) =>
+    [...(p?.querySelectorAll('.MuiPaper-root') ?? [])].find((x) => x.firstElementChild?.textContent === label)?.textContent
+  check('a draft review gives no score: the tiles show a dash',
+    t('KPI score')?.includes('— / 5') && t('KPI score')?.includes('No submitted reviews yet') &&
+    t('Performance score')?.includes('—') && t('Expectation score')?.includes('—'), p?.textContent)
+  check('…but my designation\'s KPIs still show, as rows without a score',
+    kpis.includes('Code review turnaround—Not scored yet') && kpis.includes('Escaped defects—Not scored yet') &&
+    !kpis.includes('/ 5'), kpis)
+  const bars = [...(p?.querySelectorAll('[aria-label="KPIs"] [role="progressbar"]') ?? [])]
+  check('…each with an empty bar, like a scored one',
+    bars.length === 2 && bars.every((b) => b.getAttribute('aria-valuenow') === '0'),
+    bars.map((b) => b.getAttribute('aria-valuenow')).join())
+  check('…and its expectations too', exps.includes('Joins standup—Not scored yet') &&
+    exps.includes('Updates tickets daily—Not scored yet') && !exps.includes('%'), exps)
+  check('they are read for my designation',
+    ['kpis', 'expectations'].every((tb) => captured.selects.some((s) => s.table === tb &&
+      JSON.stringify(s.filters) === JSON.stringify([['designation_id', 'eq', 'g-dev']]))),
+    JSON.stringify(captured.selects.filter((s) => s.table === 'kpis' || s.table === 'expectations')))
+}
+
+reset()
+signInAs(PEOPLE.member)
+table('kpis').push({ id: 'k-new', designation_id: 'g-dev', name: 'Docs written', description: null, target: null, weight: null })
+table('expectations').push({ id: 'x-new', designation_id: 'g-dev', title: 'Answers on Slack' })
+table('kpis').splice(table('kpis').findIndex((k) => k.id === 'k-2'), 1)
+await mountApp('/dashboard')
+{
+  const p = section('My performance')
+  const kpis = p?.querySelector('[aria-label="KPIs"]')?.textContent ?? ''
+  const exps = p?.querySelector('[aria-label="Expectations"]')?.textContent ?? ''
+  check('a KPI added since shows unscored beside the scored ones, current ones first',
+    kpis.includes('Code review turnaround3.5 / 5') && kpis.includes('Docs written—Not scored yet') &&
+    kpis.indexOf('Code review') < kpis.indexOf('Docs written'), kpis)
+  check('…a KPI no longer on my designation keeps its past average, after them',
+    kpis.includes('Escaped defects2.5 / 5') && kpis.indexOf('Docs written') < kpis.indexOf('Escaped'), kpis)
+  check('an expectation added since shows unscored', exps.includes('Answers on Slack—Not scored yet') &&
+    exps.includes('Joins standup50%'), exps)
+  check('the scores themselves are unchanged', p?.textContent?.includes('2.9 / 5') && p?.textContent?.includes('75%'),
+    p?.textContent)
+}
+
+reset()
+signInAs(PEOPLE.member)
+table('performance_reviews').length = 0
+table('kpis').length = 0
+table('expectations').length = 0
+await mountApp('/dashboard')
+check('with no reviews and nothing set for my designation, it only says there are no scores',
+  section('My performance')?.textContent?.includes('No scores yet.') &&
+  !section('My performance')?.querySelector('[aria-label="KPIs"]'), section('My performance')?.textContent)
 
 reset()
 signInAs(PEOPLE.member)

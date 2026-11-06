@@ -3618,9 +3618,93 @@ $$;
 -- Review actions (RPCs). The only way a review is created or changes status.
 -- ---------------------------------------------------------------------------
 
+-- Brings a draft review's KPIs and expectations in line with the employee's
+-- current designation. Does nothing to a submitted one.
+create function public.review_sync(p_review_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_designation uuid;
+begin
+  select e.designation_id into v_designation
+    from public.performance_reviews r join public.employees e on e.id = r.employee_id
+   where r.id = p_review_id and r.status = 'draft';
+  if not found then
+    return;
+  end if;
+
+  delete from public.performance_review_kpis l
+   where l.review_id = p_review_id
+     and not exists (select 1 from public.kpis k where k.id = l.kpi_id and k.designation_id = v_designation);
+  update public.performance_review_kpis l
+     set name = k.name, description = k.description, target = k.target, weight = k.weight,
+         sort_order = k.ord
+    from (select k.*, row_number() over (order by lower(k.name)) - 1 as ord
+            from public.kpis k where k.designation_id = v_designation) k
+   where l.review_id = p_review_id and l.kpi_id = k.id
+     and (l.name, l.description, l.target, l.weight, l.sort_order)
+         is distinct from (k.name, k.description, k.target, k.weight, k.ord);
+  insert into public.performance_review_kpis (review_id, kpi_id, name, description, target, weight, sort_order)
+  select p_review_id, k.id, k.name, k.description, k.target, k.weight, k.ord
+    from (select k.*, row_number() over (order by lower(k.name)) - 1 as ord
+            from public.kpis k where k.designation_id = v_designation) k
+   where not exists (select 1 from public.performance_review_kpis l
+                      where l.review_id = p_review_id and l.kpi_id = k.id);
+
+  delete from public.performance_review_expectations l
+   where l.review_id = p_review_id
+     and not exists (select 1 from public.expectations x
+                      where x.id = l.expectation_id and x.designation_id = v_designation);
+  update public.performance_review_expectations l
+     set title = x.title, sort_order = x.ord
+    from (select x.*, row_number() over (order by lower(x.title)) - 1 as ord
+            from public.expectations x where x.designation_id = v_designation) x
+   where l.review_id = p_review_id and l.expectation_id = x.id
+     and (l.title, l.sort_order) is distinct from (x.title, x.ord);
+  insert into public.performance_review_expectations (review_id, expectation_id, title, sort_order)
+  select p_review_id, x.id, x.title, x.ord
+    from (select x.*, row_number() over (order by lower(x.title)) - 1 as ord
+            from public.expectations x where x.designation_id = v_designation) x
+   where not exists (select 1 from public.performance_review_expectations l
+                      where l.review_id = p_review_id and l.expectation_id = x.id);
+end;
+$$;
+
+-- Any change to KPIs or expectations reaches every draft.
+create function public.review_config_changed()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.review_sync(r.id) from public.performance_reviews r where r.status = 'draft';
+  return null;
+end;
+$$;
+
+create trigger review_config_changed
+  after insert or update or delete on public.kpis
+  for each statement execute function public.review_config_changed();
+create trigger review_config_changed
+  after insert or update or delete on public.expectations
+  for each statement execute function public.review_config_changed();
+
+-- An employee moved to another designation gets its KPIs and expectations
+-- on their drafts.
+create function public.employees_reviews()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.review_sync(r.id) from public.performance_reviews r
+    where r.employee_id = new.id and r.status = 'draft';
+  return null;
+end;
+$$;
+
+create trigger employees_reviews
+  after update of designation_id on public.employees
+  for each row when (old.designation_id is distinct from new.designation_id)
+  execute function public.employees_reviews();
+
+
 -- Start the review of a month that is over, as the employee's manager, with
--- their designation's KPIs and expectations copied in. Only someone who may
--- log in and had joined by the month's first day is reviewed.
+-- their designation's KPIs and expectations copied in (review_sync). Only
+-- someone who may log in and had joined by the month's first day is reviewed.
 create function public.review_start(p_employee_id uuid, p_period date)
 returns uuid language plpgsql security definer set search_path = '' as $$
 declare
@@ -3651,12 +3735,7 @@ begin
   insert into public.performance_reviews (employee_id, period, created_by)
   values (p_employee_id, v_period, public.current_employee_id())
   returning id into v_id;
-  insert into public.performance_review_kpis (review_id, kpi_id, name, description, target, weight, sort_order)
-  select v_id, k.id, k.name, k.description, k.target, k.weight, row_number() over (order by lower(k.name)) - 1
-    from public.kpis k where k.designation_id = v_employee.designation_id;
-  insert into public.performance_review_expectations (review_id, expectation_id, title, sort_order)
-  select v_id, x.id, x.title, row_number() over (order by lower(x.title)) - 1
-    from public.expectations x where x.designation_id = v_employee.designation_id;
+  perform public.review_sync(v_id);
   return v_id;
 end;
 $$;
@@ -4007,6 +4086,7 @@ revoke execute on function
   public.can_manage_operations(), public.equipment_guard(),
   public.equipment_assign(uuid, uuid, date), public.equipment_unassign(uuid, date), public.my_equipment(),
   public.company_today(), public.review_goal_quarter(date), public.review_start(uuid, date),
+  public.review_sync(uuid), public.review_config_changed(), public.employees_reviews(),
   public.review_submit(uuid), public.review_acknowledge(uuid),
   public.performance_due(date), public.manager_notes_stamp(), public.current_business_function(),
   public.hr_feedback_stamp(), public.hr_feedback_acknowledge(uuid),
