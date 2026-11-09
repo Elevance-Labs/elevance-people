@@ -16,6 +16,7 @@ export type JobOpeningWithNames = JobOpening & {
 // is a whole-row reference, refused since some columns are hidden.
 export const JOB_OPENING_WITH_NAMES =
   'id, title, department_id, designation_id, status, due_date, description, manager_id, created_by, created_at, updated_at, ' +
+  'interview_questions, ' +
   'department:departments!job_openings_department_id_fkey(name), ' +
   'designation:designations!job_openings_designation_fkey(title), ' +
   'manager:employees!job_openings_manager_id_fkey(full_name), application_count'
@@ -111,6 +112,64 @@ export function canMoveFrom(stage: ApplicationStage, isHr: boolean) {
 export function undoableMove(events: ApplicationStageEvent[], stage: ApplicationStage) {
   const last = events.filter((e) => e.kind === 'move' && !e.undone_at).at(-1)
   return last && last.to_stage === stage ? last : null
+}
+
+// ---------------------------------------------------------------------------
+// Test and interview scores. application_move requires them; these mirror it.
+// ---------------------------------------------------------------------------
+
+// A new job's interview questions: the column default on job_openings.
+export const DEFAULT_INTERVIEW_QUESTIONS = [
+  'Technical skills: depth of knowledge and hands-on ability for the role',
+  'Problem solving: breaks down unfamiliar problems and reasons to sound solutions',
+  'Communication and people skills: explains clearly, listens and works well with others',
+  'Culture fit: shares our values and suits how we work',
+  'Mindset: ownership, curiosity and a drive to learn and grow',
+]
+// Mirrors public.valid_interview_questions.
+export const MAX_INTERVIEW_QUESTIONS = 10
+export const INTERVIEW_QUESTION_MAX_LENGTH = 300
+
+export const INTERVIEW_STAGES: ApplicationStage[] = ['interview_1', 'interview_2', 'interview_3']
+
+// What a move needs scored: a test score on from the test, a rating per
+// question on from an interview; nothing when abandoned.
+export function scoresNeeded(from: ApplicationStage, to: ApplicationStage | ''): 'test' | 'interview' | null {
+  if (!to || to === 'abandoned') return null
+  if (from === 'test') return 'test'
+  if (INTERVIEW_STAGES.includes(from)) return 'interview'
+  return null
+}
+
+const percent = (ratings: number[]) => (ratings.reduce((s, r) => s + r, 0) / ratings.length / 5) * 100
+
+// The test score of the latest move on from the test that still stands.
+export function testScore(events: ApplicationStageEvent[]) {
+  return events.filter((e) => e.test_score != null && !e.undone_at).at(-1)?.test_score ?? null
+}
+
+export type QuestionScore = { question: string; percent: number; ratings: number }
+
+// Interview ratings that still stand (undone moves left out), per question
+// across the interviews, as a percentage of the top rating; the combined
+// score is the mean of those. The test score is not part of it.
+export function interviewScores(events: ApplicationStageEvent[]) {
+  const byQuestion = new Map<string, number[]>()
+  let interviews = 0
+  for (const e of events) {
+    if (e.undone_at || !e.interview_questions || !e.interview_ratings) continue
+    interviews++
+    e.interview_questions.forEach((q, i) => {
+      byQuestion.set(q, [...(byQuestion.get(q) ?? []), e.interview_ratings![i]])
+    })
+  }
+  const questions: QuestionScore[] = [...byQuestion].map(([question, ratings]) => ({
+    question,
+    percent: percent(ratings),
+    ratings: ratings.length,
+  }))
+  const combined = questions.length ? questions.reduce((s, q) => s + q.percent, 0) / questions.length : null
+  return { interviews, questions, combined }
 }
 
 // Every column but the salaries and HR's notes, which clients can't select.

@@ -176,17 +176,27 @@ const HOLIDAYS: Row[] = [
   { id: 'h-quaid', name: 'Quaid Day', start_date: '2025-12-25', end_date: '2025-12-25' },
 ]
 
-// Hiring: one open job (Sara interviews, Amna manages) and one draft.
+// Hiring: one open job (Sara interviews, Amna manages) and one draft. The
+// open job asks three interview questions; the draft has the defaults.
+const DEFAULT_QUESTIONS = [
+  'Technical skills: depth of knowledge and hands-on ability for the role',
+  'Problem solving: breaks down unfamiliar problems and reasons to sound solutions',
+  'Communication and people skills: explains clearly, listens and works well with others',
+  'Culture fit: shares our values and suits how we work',
+  'Mindset: ownership, curiosity and a drive to learn and grow',
+]
 const JOB_OPENINGS: Row[] = [
   {
     id: 'j-open', title: 'Frontend Engineer', department_id: 'd-eng', designation_id: 'g-dev', status: 'open',
     due_date: '2026-12-31', description: '<p>Build <strong>great</strong> things.</p>', manager_id: 'e-amna',
     created_by: 'e-bilal', created_at: '2026-05-01T09:00:00Z', updated_at: '2026-05-01T09:00:00Z',
+    interview_questions: ['Technical skills', 'Communication', 'Culture fit'],
   },
   {
     id: 'j-draft', title: 'HR Intern', department_id: 'd-ops', designation_id: 'g-hr', status: 'draft',
     due_date: null, description: null, manager_id: null,
     created_by: 'e-bilal', created_at: '2026-05-02T09:00:00Z', updated_at: '2026-05-02T09:00:00Z',
+    interview_questions: DEFAULT_QUESTIONS,
   },
 ]
 
@@ -1169,12 +1179,17 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     return null
   },
 
-  application_move: ({ p_application_id: id, p_stage: stage, p_reason: reason }) => {
+  // A move on from the test keeps its score; from an interview, the job's
+  // questions copied in with a rating each.
+  application_move: ({ p_application_id: id, p_stage: stage, p_reason: reason, p_test_score, p_ratings }) => {
     const a = find('job_applications', id)
     if (!a) return null
     rowsIn('application_stage_events').push({
       id: nextId++, application_id: id, kind: 'move', from_stage: a.stage, to_stage: stage, reason,
       created_by: authState.bound?.id, created_at: new Date().toISOString(), undone_by: null, undone_at: null,
+      test_score: p_test_score ?? null,
+      interview_questions: p_ratings ? find('job_openings', a.job_opening_id)?.interview_questions : null,
+      interview_ratings: p_ratings ?? null,
     })
     Object.assign(a, { stage, stage_changed_at: new Date().toISOString() })
     return null

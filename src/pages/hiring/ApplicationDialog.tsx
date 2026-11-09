@@ -10,10 +10,13 @@ import {
   Divider,
   IconButton,
   InputAdornment,
+  LinearProgress,
   Link as MuiLink,
   MenuItem,
   Stack,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
   useMediaQuery,
   useTheme,
@@ -43,6 +46,9 @@ import {
   NEXT_STAGES,
   canMoveFrom,
   hireError,
+  interviewScores,
+  scoresNeeded,
+  testScore,
   undoableMove,
   type ApplicationHrDetails,
   type BoardApplication,
@@ -55,6 +61,27 @@ const CV_URL_SECONDS = 60 * 60
 function StageChip({ stage, size = 'small' }: { stage: ApplicationStage; size?: 'small' | 'medium' }) {
   return <Chip label={STAGE_LABELS[stage]} color={STAGE_COLORS[stage]} size={size} />
 }
+
+// 1 to 5, for the test score and each interview question.
+function RatingPicker({ label, value, onChange }: { label: string; value: number | null; onChange: (n: number) => void }) {
+  return (
+    <ToggleButtonGroup
+      exclusive
+      size="small"
+      value={value}
+      onChange={(_, n: number | null) => n != null && onChange(n)}
+      aria-label={label}
+    >
+      {[1, 2, 3, 4, 5].map((n) => (
+        <ToggleButton key={n} value={n} sx={{ width: 40 }}>
+          {n}
+        </ToggleButton>
+      ))}
+    </ToggleButtonGroup>
+  )
+}
+
+const pct = (n: number) => `${Math.round(n)}%`
 
 function Fact({ icon, children }: { icon: ReactElement; children: ReactNode }) {
   return (
@@ -70,12 +97,15 @@ function Fact({ icon, children }: { icon: ReactElement; children: ReactNode }) {
 export default function ApplicationDialog({
   application: a,
   jobTitle,
+  interviewQuestions,
   people,
   onMoved,
   onClose,
 }: {
   application: BoardApplication
   jobTitle: string
+  // The job's questions, each rated on a move on from an interview.
+  interviewQuestions: string[]
   people: DirectoryEntry[]
   onMoved: (stage: ApplicationStage) => Promise<void>
   onClose: () => void
@@ -94,6 +124,8 @@ export default function ApplicationDialog({
   const [error, setError] = useState<string | null>(null)
   const [to, setTo] = useState<ApplicationStage | ''>('')
   const [reason, setReason] = useState('')
+  const [score, setScore] = useState<number | null>(null)
+  const [ratings, setRatings] = useState<(number | null)[]>([])
   const [busy, setBusy] = useState(false)
   const [undoing, setUndoing] = useState(false)
   const [undoReason, setUndoReason] = useState('')
@@ -141,7 +173,9 @@ export default function ApplicationDialog({
     loadEvents()
     setTo('')
     setReason('')
-  }, [loadEvents, a.stage])
+    setScore(null)
+    setRatings(interviewQuestions.map(() => null))
+  }, [loadEvents, a.stage, interviewQuestions])
 
   useEffect(() => {
     setHire(undefined)
@@ -159,11 +193,18 @@ export default function ApplicationDialog({
   const undo = isHr && !(a.stage === 'hired' && hire !== null) ? undoableMove(events, a.stage) : null
   const textRequired = !!to && NEEDS_TEXT.includes(to)
   const isReason = !!to && NEEDS_REASON.includes(to)
+  const needs = scoresNeeded(a.stage, to)
+  const currentTest = testScore(events)
+  const interviews = interviewScores(events)
 
   async function move() {
     if (!to) return
     if (textRequired && !reason.trim()) {
       return setError(`${isReason ? 'Give a reason' : 'Add remarks'} for moving to ${STAGE_LABELS[to]}.`)
+    }
+    if (needs === 'test' && score == null) return setError('Give the test a score from 1 to 5.')
+    if (needs === 'interview' && ratings.some((r) => r == null)) {
+      return setError('Rate every interview question from 1 to 5.')
     }
     setBusy(true)
     setError(null)
@@ -179,9 +220,17 @@ export default function ApplicationDialog({
             p_application_id: a.id,
             p_stage: to,
             p_reason: reason.trim() || null,
+            ...(needs === 'test' && { p_test_score: score }),
+            ...(needs === 'interview' && { p_ratings: ratings }),
           })
     setBusy(false)
-    if (moveError) return setError(to === 'hired' ? hireError(moveError) : moveError.message)
+    if (moveError) {
+      // The job's questions changed since this page loaded.
+      if (needs === 'interview' && moveError.message.includes('Rate every interview question')) {
+        return setError('The job’s interview questions have changed. Reload the page and rate them again.')
+      }
+      return setError(to === 'hired' ? hireError(moveError) : moveError.message)
+    }
     await onMoved(to)
   }
 
@@ -383,6 +432,38 @@ export default function ApplicationDialog({
                   />
                 </>
               )}
+              {needs === 'test' && (
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.75 }}>
+                    Test score
+                  </Typography>
+                  <RatingPicker label="Test score" value={score} onChange={setScore} />
+                </Box>
+              )}
+              {needs === 'interview' && (
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    Interview ratings
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    1 is poor, 5 is excellent.
+                  </Typography>
+                  <Stack spacing={1.5} sx={{ mt: 1 }}>
+                    {interviewQuestions.map((q, i) => (
+                      <Box key={q}>
+                        <Typography variant="body2" sx={{ mb: 0.5 }}>
+                          {q}
+                        </Typography>
+                        <RatingPicker
+                          label={`Rating for ${q}`}
+                          value={ratings[i] ?? null}
+                          onChange={(n) => setRatings((r) => r.map((x, j) => (j === i ? n : x)))}
+                        />
+                      </Box>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
               <TextField
                 label={isReason ? 'Reason' : 'Remarks'}
                 required={textRequired}
@@ -433,6 +514,59 @@ export default function ApplicationDialog({
             <Alert severity="error" sx={{ mt: 2 }} onClose={() => setError(null)}>
               {error}
             </Alert>
+          )}
+
+          {(currentTest != null || interviews.interviews > 0) && (
+            <Box aria-label="Scores" role="region">
+              <Divider sx={{ my: 3 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1.5 }}>
+                Scores
+              </Typography>
+              {currentTest != null && (
+                <Stack direction="row" sx={{ justifyContent: 'space-between', mb: 1.5 }}>
+                  <Typography variant="body2">Test score</Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }} aria-label="Test score">
+                    {currentTest}/5
+                  </Typography>
+                </Stack>
+              )}
+              {interviews.combined != null && (
+                <>
+                  <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <Typography variant="body2">
+                      Interviews{' '}
+                      <Typography component="span" variant="caption" sx={{ color: 'text.secondary' }}>
+                        ({interviews.interviews === 1 ? '1 interview' : `${interviews.interviews} interviews`}, test
+                        not included)
+                      </Typography>
+                    </Typography>
+                    <Typography variant="h6" component="p" aria-label="Combined interview score">
+                      {pct(interviews.combined)}
+                    </Typography>
+                  </Stack>
+                  <Stack component="ul" spacing={1.25} sx={{ listStyle: 'none', p: 0, m: 0, mt: 1 }}>
+                    {interviews.questions.map((q) => (
+                      <Box component="li" key={q.question}>
+                        <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between' }}>
+                          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                            {q.question}
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 500 }} aria-label={`Score for ${q.question}`}>
+                            {pct(q.percent)}
+                          </Typography>
+                        </Stack>
+                        <LinearProgress
+                          variant="determinate"
+                          value={q.percent}
+                          aria-hidden
+                          sx={{ mt: 0.5, height: 6, borderRadius: 3 }}
+                        />
+                      </Box>
+                    ))}
+                  </Stack>
+                </>
+              )}
+            </Box>
           )}
 
           {details && isHr && (
@@ -524,6 +658,25 @@ export default function ApplicationDialog({
                 <Typography variant="caption" component="div" sx={{ color: 'text.secondary' }}>
                   From {STAGE_LABELS[e.from_stage]} · {nameOf(e.created_by)} · {formatDayTime(e.created_at)}
                 </Typography>
+                {e.test_score != null && (
+                  <Typography variant="body2" sx={{ mt: 0.5 }}>
+                    Test score {e.test_score}/5
+                  </Typography>
+                )}
+                {e.interview_questions && e.interview_ratings && (
+                  <Box component="dl" sx={{ mt: 0.5, mb: 0 }}>
+                    {e.interview_questions.map((q, i) => (
+                      <Stack key={q} direction="row" spacing={1} sx={{ justifyContent: 'space-between' }}>
+                        <Typography component="dt" variant="caption" sx={{ color: 'text.secondary' }}>
+                          {q.split(':')[0]}
+                        </Typography>
+                        <Typography component="dd" variant="caption" sx={{ m: 0, fontWeight: 500 }}>
+                          {e.interview_ratings![i]}/5
+                        </Typography>
+                      </Stack>
+                    ))}
+                  </Box>
+                )}
                 {e.reason && (
                   <Typography
                     variant="body2"

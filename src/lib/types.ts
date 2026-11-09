@@ -191,6 +191,8 @@ export interface JobOpening {
   created_by: string | null
   created_at: string
   updated_at: string
+  // What each interview rates, 1-5 per question (1 to 10 of them).
+  interview_questions: string[]
 }
 
 export interface JobOpeningInterviewer {
@@ -245,6 +247,12 @@ export interface ApplicationStageEvent {
   created_at: string
   undone_by: string | null
   undone_at: string | null
+  // A move on from the test: its score, 1-5.
+  test_score: number | null
+  // A move on from an interview: the job's questions then, and a 1-5 rating
+  // for each, in the same order.
+  interview_questions: string[] | null
+  interview_ratings: number[] | null
 }
 
 // A row of the job_posting RPC: an open job as the public page shows it.

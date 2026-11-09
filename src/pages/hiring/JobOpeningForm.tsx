@@ -7,6 +7,7 @@ import {
   Button,
   CircularProgress,
   Grid,
+  IconButton,
   MenuItem,
   Paper,
   Snackbar,
@@ -15,6 +16,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import AddIcon from '@mui/icons-material/Add'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
@@ -24,7 +26,10 @@ import { RichTextEditor } from '../../components/RichText'
 import { supabase } from '../../lib/supabase'
 import { JOB_STATUS_LABELS } from '../../lib/constants'
 import {
+  DEFAULT_INTERVIEW_QUESTIONS,
+  INTERVIEW_QUESTION_MAX_LENGTH,
   JOB_OPENING_WITH_NAMES,
+  MAX_INTERVIEW_QUESTIONS,
   canHire,
   copyText,
   jobOpeningError,
@@ -42,6 +47,7 @@ const EMPTY = {
   due_date: '',
   description: '',
   manager_id: '',
+  interview_questions: DEFAULT_INTERVIEW_QUESTIONS,
 }
 type FormState = typeof EMPTY
 
@@ -54,6 +60,7 @@ function toForm(j: JobOpeningWithNames): FormState {
     due_date: j.due_date ?? '',
     description: j.description ?? '',
     manager_id: j.manager_id ?? '',
+    interview_questions: j.interview_questions,
   }
 }
 
@@ -166,6 +173,8 @@ export default function JobOpeningForm() {
   async function save(e: FormEvent) {
     e.preventDefault()
     if (!form.department_id || !form.designation_id) return setError('Pick a department and a designation.')
+    const questions = form.interview_questions.map((q) => q.trim()).filter(Boolean)
+    if (!questions.length) return setError('Add at least one interview question.')
     setBusy(true)
     setError(null)
     const payload = {
@@ -176,6 +185,7 @@ export default function JobOpeningForm() {
       due_date: form.due_date || null,
       description: isBlankHtml(form.description) ? null : sanitizeHtml(form.description),
       manager_id: form.manager_id || null,
+      interview_questions: questions,
     }
     const table = supabase.from('job_openings')
     const { data, error: saveError } = await (id ? table.update(payload).eq('id', id) : table.insert([payload]))
@@ -355,6 +365,42 @@ export default function JobOpeningForm() {
                   onChange={(html) => set('description', html)}
                   placeholder="About the role, responsibilities, requirements…"
                 />
+              </Section>
+
+              <Section
+                title="Interview questions"
+                description="Moving an application on from an interview rates each question from 1 to 5. Changes apply to interviews rated after saving."
+              >
+                {form.interview_questions.map((q, i) => (
+                  <Stack key={i} direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+                    <TextField
+                      label={`Question ${i + 1}`}
+                      fullWidth
+                      multiline
+                      value={q}
+                      onChange={(e) =>
+                        set('interview_questions', form.interview_questions.map((x, j) => (j === i ? e.target.value : x)))
+                      }
+                      slotProps={{ htmlInput: { maxLength: INTERVIEW_QUESTION_MAX_LENGTH } }}
+                    />
+                    <IconButton
+                      aria-label={`Remove question ${i + 1}`}
+                      disabled={form.interview_questions.length === 1}
+                      onClick={() => set('interview_questions', form.interview_questions.filter((_x, j) => j !== i))}
+                      sx={{ mt: 1 }}
+                    >
+                      <DeleteOutlineIcon />
+                    </IconButton>
+                  </Stack>
+                ))}
+                <Button
+                  startIcon={<AddIcon />}
+                  onClick={() => set('interview_questions', [...form.interview_questions, ''])}
+                  disabled={form.interview_questions.length >= MAX_INTERVIEW_QUESTIONS}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  Add question
+                </Button>
               </Section>
             </Stack>
           </Grid>

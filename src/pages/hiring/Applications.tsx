@@ -21,7 +21,7 @@ import { APPLICATION_COLUMNS, STAGES, TEAM_STAGES, type BoardApplication } from 
 import type { ApplicationStage, DirectoryEntry, JobOpeningStatus } from '../../lib/types'
 import ApplicationDialog from './ApplicationDialog'
 
-type Job = { id: string; title: string; status: JobOpeningStatus }
+type Job = { id: string; title: string; status: JobOpeningStatus; interview_questions: string[] }
 
 const COLUMN_WIDTH = 272
 
@@ -58,7 +58,7 @@ export default function Applications() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from('job_openings').select('id, title, status').order('created_at', { ascending: false }),
+      supabase.from('job_openings').select('id, title, status, interview_questions').order('created_at', { ascending: false }),
       supabase.from('employee_directory').select('*'),
     ]).then(([jobsRes, peopleRes]) => {
       const loadError = jobsRes.error ?? peopleRes.error
@@ -234,6 +234,7 @@ export default function Applications() {
         <ApplicationDialog
           application={open}
           jobTitle={job.title}
+          interviewQuestions={job.interview_questions}
           people={people}
           onMoved={moved}
           onClose={() => setQuery(jobId, null)}

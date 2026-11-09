@@ -299,6 +299,14 @@ create index leaves_type_idx on public.leaves (leave_type_id);
 -- tables directly; it goes through job_posting and submit_application.
 -- ---------------------------------------------------------------------------
 
+-- A job's interview questions: 1 to 10, each trimmed text.
+create function public.valid_interview_questions(p text[])
+returns boolean language sql immutable set search_path = '' as $$
+  select cardinality(p) between 1 and 10
+     and not exists (select 1 from unnest(p) q
+                      where q is null or q <> trim(q) or q = '' or length(q) > 300);
+$$;
+
 -- Only an open job is shown publicly, and it takes applications until its
 -- due date. Deleting one is refused while it has applications (close it).
 create table public.job_openings (
@@ -316,6 +324,15 @@ create table public.job_openings (
   created_by     uuid,
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
+  -- What each interview rates (1-5 per question; see application_move).
+  -- Defaults mirrored in src/lib/hiring.ts.
+  interview_questions text[] not null default array[
+    'Technical skills: depth of knowledge and hands-on ability for the role',
+    'Problem solving: breaks down unfamiliar problems and reasons to sound solutions',
+    'Communication and people skills: explains clearly, listens and works well with others',
+    'Culture fit: shares our values and suits how we work',
+    'Mindset: ownership, curiosity and a drive to learn and grow'
+  ]::text[] check (public.valid_interview_questions(interview_questions)),
   constraint job_openings_department_id_fkey foreign key (department_id)
     references public.departments (id) on delete restrict,
   -- Keeps the designation inside the department, as for employees.
@@ -367,7 +384,9 @@ create unique index job_applications_email_key on public.job_applications (job_o
 create index job_applications_job_stage_idx on public.job_applications (job_opening_id, stage);
 
 -- An application's moves between stages, written only by application_move and
--- application_undo. An undone move keeps its row, marked undone.
+-- application_undo. An undone move keeps its row, marked undone. A move on
+-- from the test carries its score, one on from an interview a rating per
+-- question (the job's questions at the time, copied in).
 create table public.application_stage_events (
   id             bigint generated always as identity primary key,
   application_id uuid not null references public.job_applications (id) on delete cascade,
@@ -378,7 +397,15 @@ create table public.application_stage_events (
   created_by     uuid references public.employees (id) on delete set null,
   created_at     timestamptz not null default now(),
   undone_by      uuid references public.employees (id) on delete set null,
-  undone_at      timestamptz
+  undone_at      timestamptz,
+  test_score     smallint check (test_score between 1 and 5),
+  interview_questions text[],
+  interview_ratings   smallint[],
+  constraint application_stage_events_ratings_check check (
+    (interview_questions is null) = (interview_ratings is null)
+    and cardinality(interview_ratings) = cardinality(interview_questions)
+    and array_position(interview_ratings, null) is null
+    and 1 <= all (interview_ratings) and 5 >= all (interview_ratings))
 );
 create index application_stage_events_application_idx
   on public.application_stage_events (application_id, id);
@@ -2036,13 +2063,18 @@ $$;
 
 -- Move an application to one of its next stages (with a reason where one is
 -- required). The only way forward, except to hired (application_hire).
+-- Moving on from the test takes a test score, and from an interview a rating
+-- for each of the job's interview questions; neither when abandoned.
 create function public.application_move(
-  p_application_id uuid, p_stage public.application_stage, p_reason text default null)
+  p_application_id uuid, p_stage public.application_stage, p_reason text default null,
+  p_test_score smallint default null, p_ratings smallint[] default null)
 returns void language plpgsql security definer set search_path = '' as $$
 declare
-  v_me     uuid := public.current_employee_id();
-  v_app    public.job_applications;
-  v_reason text := nullif(trim(p_reason), '');
+  v_me        uuid := public.current_employee_id();
+  v_app       public.job_applications;
+  v_reason    text := nullif(trim(p_reason), '');
+  v_scored    boolean;
+  v_questions text[];
 begin
   select * into v_app from public.job_applications where id = p_application_id for update;
   if not found or v_me is null or not public.can_see_application(v_app.job_opening_id, v_app.stage) then
@@ -2061,11 +2093,33 @@ begin
     raise exception 'Give a reason for moving this application to %.', p_stage using errcode = '23514';
   end if;
 
+  v_scored := p_stage <> 'abandoned';
+  if v_app.stage = 'test' and v_scored then
+    if p_test_score is null or p_test_score not between 1 and 5 then
+      raise exception 'Give the test a score from 1 to 5.' using errcode = '23514';
+    end if;
+  elsif p_test_score is not null then
+    raise exception 'Only a move on from the test takes a test score.' using errcode = '23514';
+  end if;
+  if v_app.stage in ('interview_1', 'interview_2', 'interview_3') and v_scored then
+    select j.interview_questions into v_questions
+      from public.job_openings j where j.id = v_app.job_opening_id;
+    if p_ratings is null or cardinality(p_ratings) <> cardinality(v_questions)
+       or array_position(p_ratings, null) is not null
+       or not (1 <= all (p_ratings) and 5 >= all (p_ratings)) then
+      raise exception 'Rate every interview question from 1 to 5.' using errcode = '23514';
+    end if;
+  elsif p_ratings is not null then
+    raise exception 'Only a move on from an interview takes ratings.' using errcode = '23514';
+  end if;
+
   update public.job_applications set stage = p_stage, stage_changed_at = now()
    where id = p_application_id;
   insert into public.application_stage_events
-    (application_id, kind, from_stage, to_stage, reason, created_by)
-  values (p_application_id, 'move', v_app.stage, p_stage, v_reason, v_me);
+    (application_id, kind, from_stage, to_stage, reason, created_by,
+     test_score, interview_questions, interview_ratings)
+  values (p_application_id, 'move', v_app.stage, p_stage, v_reason, v_me,
+          p_test_score, case when p_ratings is not null then v_questions end, p_ratings);
 end;
 $$;
 
@@ -3944,8 +3998,10 @@ grant insert (name, start_date, end_date), update (name, start_date, end_date)
 
 grant select, delete on public.job_openings to authenticated;
 -- created_by is stamped by the trigger, so it isn't writable.
-grant insert (title, department_id, designation_id, status, due_date, description, manager_id),
-      update (title, department_id, designation_id, status, due_date, description, manager_id)
+grant insert (title, department_id, designation_id, status, due_date, description, manager_id,
+              interview_questions),
+      update (title, department_id, designation_id, status, due_date, description, manager_id,
+              interview_questions)
   on public.job_openings to authenticated;
 grant select, insert, delete on public.job_opening_interviewers to authenticated;
 -- Applications are only ever written by submit_application and the stage
@@ -4057,6 +4113,7 @@ revoke execute on function
   public.holidays_recount(),
   public.leave_decide(uuid, boolean, text), public.leave_cancel(uuid),
   public.leave_balances(uuid, integer), public.valid_perks(jsonb), public.job_openings_stamp(),
+  public.valid_interview_questions(text[]),
   public.job_accepts_applications(text), public.job_posting(uuid), public.public_branding(),
   public.submit_application(uuid, text, text, text, integer, text, text, text),
   public.announcements_stamp(),
@@ -4067,7 +4124,7 @@ revoke execute on function
   public.is_hiring_team(uuid), public.on_hiring_team(),
   public.can_see_application(uuid, public.application_stage), public.application_hr_details(uuid),
   public.application_set_hr_details(uuid, integer, text),
-  public.application_move(uuid, public.application_stage, text),
+  public.application_move(uuid, public.application_stage, text, smallint, smallint[]),
   public.application_undo(uuid, text), public.application_count(public.job_openings),
   public.onboarding_template_sections_stamp(), public.onboarding_template_tasks_stamp(),
   public.onboarding_reorder_sections(uuid[]), public.onboarding_reorder_tasks(uuid, uuid[]),
@@ -4111,7 +4168,7 @@ grant execute on function
   public.bind_employee(), public.org_chart_remove(uuid),
   public.leave_days(date, date, boolean), public.is_manager_of(uuid),
   public.leave_decide(uuid, boolean, text), public.leave_cancel(uuid),
-  public.leave_balances(uuid, integer), public.valid_perks(jsonb),
+  public.leave_balances(uuid, integer), public.valid_perks(jsonb), public.valid_interview_questions(text[]),
   public.application_next_stages(public.application_stage),
   public.application_stage_needs_reason(public.application_stage),
   public.application_team_stage(public.application_stage),
@@ -4119,7 +4176,7 @@ grant execute on function
   public.is_hiring_team(uuid), public.on_hiring_team(),
   public.can_see_application(uuid, public.application_stage), public.application_hr_details(uuid),
   public.application_set_hr_details(uuid, integer, text),
-  public.application_move(uuid, public.application_stage, text),
+  public.application_move(uuid, public.application_stage, text, smallint, smallint[]),
   public.application_undo(uuid, text), public.application_count(public.job_openings),
   public.onboarding_reorder_sections(uuid[]), public.onboarding_reorder_tasks(uuid, uuid[]),
   public.application_hire(uuid, text, date, text), public.can_see_onboarding(uuid),

@@ -57,7 +57,8 @@ behaviour).
   Job applications are written only by `submit_application` (HR's current
   salary and notes by `application_set_hr_details`); their stage
   moves only through `application_move` / `application_undo`, and to hired
-  only through `application_hire`. Onboardings change only through
+  only through `application_hire`; the test score and interview ratings
+  are given only with `application_move`. Onboardings change only through
   `onboarding_task_set` / `_complete` / `_cancel`, and the checklist sync
   (`onboarding_sync` / `offboarding_sync`, run by triggers on checklist and
   department changes, in progress only); checklist order only
@@ -265,7 +266,8 @@ behaviour).
   helpers, balance maths, leave and holiday error messages.
 - `hiring.ts` — job select (named FKs), public job URL, logo URL, job and
   application error messages; application stages: transitions, reason and
-  hiring-team rules (mirrors of the SQL), board columns, hire error messages.
+  hiring-team rules (mirrors of the SQL), board columns, hire error messages;
+  default interview questions, which moves need scores, the score maths.
 - `onboarding.ts` — onboarding selects (named employee FK), progress, overdue,
   grouping tasks by section (also offboarding's), who may tick a task (mirror
   of `can_tick_checklist_task`, both kinds), reorder helper, error messages.
@@ -388,7 +390,8 @@ Full detail in `supabase/schema.sql`.
 - `job_openings` (+ `job_opening_interviewers`, `manager_id`) — HR manages;
   the job's hiring team (manager, interviewers; `is_hiring_team`) reads it. Department and designation required, kept consistent by the same
   composite FK as employees. Public only while `open`; takes applications
-  until `due_date`. `created_by` stamped by trigger.
+  until `due_date`. `created_by` stamped by trigger. Its interview
+  questions (1–10, five defaults) are what each interview rates.
 - `job_applications` — written only by `submit_application` (security
   definer, callable by anon); HR's current salary and notes only by
   `application_set_hr_details`, read with the expected salary through
@@ -398,7 +401,11 @@ Full detail in `supabase/schema.sql`.
   hired) and HR's `application_undo`. Visible to HR, and to the hiring team from shortlisted
   through cleared (`can_see_application`); the team moves only out of
   shortlisted, test and interviews. `application_stage_events` is the
-  timeline (moves and undos, undone moves kept). CV in the private
+  timeline (moves and undos, undone moves kept); a move on from the test
+  carries its score, one on from an interview a 1–5 rating per question
+  (questions copied in), both required by `application_move` except to
+  abandoned. The app's percentages (`hiring.ts`) leave out the test and
+  undone moves. CV in the private
   `job-applications` bucket at `<job_opening_id>/…`, where the storage policy
   only lets anyone upload while that job takes applications, and reads follow
   who can see the application. A job with

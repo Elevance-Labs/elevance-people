@@ -57,6 +57,19 @@ await choose('Designation', 'Software Engineer')
 await choose('Status', 'Open')
 await type('Due date', '2026-07-31')
 
+const questionValues = () =>
+  [...document.querySelectorAll<HTMLTextAreaElement>('textarea:not([aria-hidden])')]
+    .filter((t) => t.closest('.MuiFormControl-root')?.querySelector('label')?.textContent?.startsWith('Question'))
+    .map((t) => t.value)
+check('a new job starts with five interview questions, covering skills, people, culture and mindset',
+  questionValues().length === 5 && ['Technical skills', 'Problem solving', 'Communication and people skills',
+    'Culture fit', 'Mindset'].every((q, i) => questionValues()[i].startsWith(q)), questionValues().join(' | '))
+await click(button('Remove question 5'))
+await click(button('Add question'))
+await type('Question 5', '  Ownership of outcomes  ')
+await click(button('Add question'))
+check('questions can be removed and added', questionValues().length === 6 && questionValues()[5] === '')
+
 await click(button('Open', field('Hiring manager')!))
 const managers = options().map((o) => o.textContent ?? '')
 check('people who have left are not offered for the hiring team',
@@ -69,10 +82,17 @@ await click(options().find((o) => o.textContent?.includes('Bilal Ahmed')))
 
 await click(button('Create job opening'))
 const created = captured.inserts.find((i) => i.table === 'job_openings')?.rows[0]
-check('creating sends only the editable columns, trimmed, with no description when blank',
+check('creating sends only the editable columns, trimmed, with no description when blank, blank questions dropped',
   JSON.stringify(created) === JSON.stringify({
     title: 'Backend Engineer', department_id: 'd-eng', designation_id: 'g-dev', status: 'open',
     due_date: '2026-07-31', description: null, manager_id: 'e-amna',
+    interview_questions: [
+      'Technical skills: depth of knowledge and hands-on ability for the role',
+      'Problem solving: breaks down unfamiliar problems and reasons to sound solutions',
+      'Communication and people skills: explains clearly, listens and works well with others',
+      'Culture fit: shares our values and suits how we work',
+      'Ownership of outcomes',
+    ],
   }), JSON.stringify(created))
 const newId = table('job_openings').find((j) => j.title === 'Backend Engineer')?.id
 check('…then adds the interviewers to the new job',
@@ -101,7 +121,8 @@ await type('Job title', 'Senior Frontend Engineer')
 await click(button('Save changes'))
 const updated = captured.updates.find((u) => u.table === 'job_openings')
 check('saving updates the job by id, never with created_by',
-  updated?.values.title === 'Senior Frontend Engineer' && !('created_by' in (updated?.values ?? {})) &&
+  updated?.values.title === 'Senior Frontend Engineer' &&
+  JSON.stringify(updated?.values.interview_questions) === JSON.stringify(['Technical skills', 'Communication', 'Culture fit']) && !('created_by' in (updated?.values ?? {})) &&
   JSON.stringify(updated?.filters) === JSON.stringify([['id', 'eq', 'j-open']]), JSON.stringify(updated))
 check('…with a sanitised description (no script, no image)',
   !/script|img|onerror/.test(String(updated?.values.description)), String(updated?.values.description))
@@ -351,7 +372,7 @@ check('HR sees the expected salary', d().querySelector('[aria-label="Expected sa
   d().querySelector('[aria-label="Expected salary"]')?.textContent)
 check('the CV is shown in a viewer from a signed URL',
   d().querySelector('iframe')?.getAttribute('src') === 'https://signed.example/job-applications/j-open/a-short.pdf')
-const timeline = () => d().querySelector('[aria-label="Timeline"]')?.textContent ?? ''
+const timeline = () => dialog()!.querySelector('[aria-label="Timeline"]')?.textContent ?? ''
 check('the timeline shows each move with who made it and the reason, and the application',
   timeline().includes('Moved to Shortlisted') && timeline().includes('Moved to Screened') &&
   timeline().includes('Good CV') && timeline().includes('Bilal Ahmed') && timeline().includes('Applied'), timeline())
@@ -442,17 +463,90 @@ check('moving to an interview needs remarks', !!remarks()?.required && !field('R
 await click(button('Move', dialog()!))
 check('…and won’t move without them', !captured.rpcs.some((r) => r.name === 'application_move') &&
   !!remarks()?.matches(':invalid'))
+const rate = async (question: string, n: number) =>
+  click(button(String(n), dialog()!.querySelector(`[aria-label="Rating for ${question}"]`)!))
+check('moving on from an interview asks for a rating of each of the job’s questions',
+  ['Technical skills', 'Communication', 'Culture fit'].every((q) =>
+    dialog()!.querySelector(`[aria-label="Rating for ${q}"]`)?.querySelectorAll('button').length === 5) &&
+  !dialog()!.querySelector('[aria-label="Test score"]'))
 await type('Remarks', 'Strong system design round', dialog()!)
+await rate('Technical skills', 4)
+await rate('Communication', 3)
 await click(button('Move', dialog()!))
-check('…then moves with them',
+check('…and won’t move until every question is rated', !captured.rpcs.some((r) => r.name === 'application_move') &&
+  dialog()!.textContent!.includes('Rate every interview question from 1 to 5.'))
+await rate('Culture fit', 5)
+await click(button('Move', dialog()!))
+check('…then moves with the remarks and the ratings, in question order',
   JSON.stringify(captured.rpcs.find((r) => r.name === 'application_move')?.args) ===
-    JSON.stringify({ p_application_id: 'a-int', p_stage: 'interview_2', p_reason: 'Strong system design round' }),
+    JSON.stringify({
+      p_application_id: 'a-int', p_stage: 'interview_2', p_reason: 'Strong system design round', p_ratings: [4, 3, 5],
+    }),
   JSON.stringify(captured.rpcs.filter((r) => r.name === 'application_move')))
+const scoreOf = (label: string) => dialog()!.querySelector(`[aria-label="${label}"]`)?.textContent
+check('the scores show each question as a percentage, and the combined score',
+  await waitFor(() => scoreOf('Combined interview score') === '80%') &&
+  scoreOf('Score for Technical skills') === '80%' && scoreOf('Score for Communication') === '60%' &&
+  scoreOf('Score for Culture fit') === '100%', dialog()!.querySelector('[aria-label="Scores"]')?.textContent)
+check('…and the timeline shows the ratings given', timeline().includes('Communication3/5'), timeline())
+await openMoveTo()
+await click(options().find((o) => o.textContent === 'Abandoned'))
+check('abandoning asks for no ratings', !dialog()!.querySelector('[aria-label^="Rating for"]'))
 await click(button('Close', dialog()!))
 await waitFor(() => !dialog())
 await openCard('Fatima Shah')
 check('from cleared only HR moves it on', !field('Move to', dialog()!) &&
   dialog()!.textContent!.includes('Only HR can move an application on from Cleared.'))
+
+// ---------------- test score, then interview scores ----------------
+reset()
+signInAs(PEOPLE.hr)
+table('job_applications').push({
+  id: 'a-test', job_opening_id: 'j-open', full_name: 'Bilal Raza', email: 'a-test@example.com', phone: '0300 7654321',
+  expected_salary: 200000, current_salary: null, hr_notes: null, note: null, resume_path: 'j-open/a-test.pdf',
+  resume_name: 'CV.pdf', created_at: '2026-05-10T09:00:00Z', stage: 'test', stage_changed_at: '2026-05-20T09:00:00Z',
+})
+await mountApp('/applications?job=j-open&application=a-test')
+await waitFor(() => !!dialog())
+await openMoveTo()
+await click(options().find((o) => o.textContent === 'Abandoned'))
+check('abandoning at the test asks for no score', !dialog()!.querySelector('[aria-label="Test score"]'))
+await openMoveTo()
+await click(options().find((o) => o.textContent === 'Interview 1'))
+check('moving on from the test asks for a score of 1 to 5, and still for remarks',
+  dialog()!.querySelector('[aria-label="Test score"]')?.querySelectorAll('button').length === 5 && !!remarks()?.required &&
+  !dialog()!.querySelector('[aria-label^="Rating for"]'))
+await type('Remarks', 'Solid take-home', dialog()!)
+await click(button('Move', dialog()!))
+check('…and won’t move without the score', !captured.rpcs.some((r) => r.name === 'application_move') &&
+  dialog()!.textContent!.includes('Give the test a score from 1 to 5.'))
+await click(button('4', dialog()!.querySelector('[aria-label="Test score"]')!))
+await click(button('Move', dialog()!))
+check('…then sends it with the move',
+  JSON.stringify(captured.rpcs.find((r) => r.name === 'application_move')?.args) ===
+    JSON.stringify({ p_application_id: 'a-test', p_stage: 'interview_1', p_reason: 'Solid take-home', p_test_score: 4 }),
+  JSON.stringify(captured.rpcs.filter((r) => r.name === 'application_move')))
+check('the test score shows, with no interview score yet',
+  await waitFor(() => scoreOf('Test score') === '4/5') && !dialog()!.querySelector('[aria-label="Combined interview score"]'))
+await openMoveTo()
+await click(options().find((o) => o.textContent === 'Cleared'))
+await type('Remarks', 'Great fit', dialog()!)
+await rate('Technical skills', 5)
+await rate('Communication', 5)
+await rate('Culture fit', 4)
+await click(button('Move', dialog()!))
+check('the combined score leaves the test out',
+  await waitFor(() => scoreOf('Combined interview score') === '93%') && scoreOf('Test score') === '4/5',
+  dialog()!.querySelector('[aria-label="Scores"]')?.textContent)
+await click(button('Undo: back to Interview 1', dialog()!))
+await click(button('Undo move'))
+check('an undone interview’s ratings drop out of the scores',
+  await waitFor(() => !dialog()!.querySelector('[aria-label="Combined interview score"]') && scoreOf('Test score') === '4/5'))
+await openMoveTo()
+await click(options().find((o) => o.textContent === 'Rejected'))
+await type('Reason', 'Went with another candidate', dialog()!)
+await click(button('Move', dialog()!))
+check('a rejection from an interview is rated too', dialog()!.textContent!.includes('Rate every interview question'))
 
 reset()
 table('job_openings')[0].manager_id = 'e-sara'
