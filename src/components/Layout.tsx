@@ -16,6 +16,7 @@ import {
   MenuItem,
   TextField,
   Toolbar,
+  Tooltip,
   Typography,
   useMediaQuery,
   useTheme,
@@ -44,6 +45,8 @@ import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined'
 import LogoutIcon from '@mui/icons-material/Logout'
 import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined'
 import MenuIcon from '@mui/icons-material/Menu'
+import KeyboardDoubleArrowLeftIcon from '@mui/icons-material/KeyboardDoubleArrowLeft'
+import KeyboardDoubleArrowRightIcon from '@mui/icons-material/KeyboardDoubleArrowRight'
 import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined'
 import PriceCheckOutlinedIcon from '@mui/icons-material/PriceCheckOutlined'
 import PaletteOutlinedIcon from '@mui/icons-material/PaletteOutlined'
@@ -59,9 +62,12 @@ import { APP_ROLE_LABELS } from '../lib/constants'
 import { PASSWORD_MIN_LENGTH } from '../lib/passwordLogin'
 import { supabase } from '../lib/supabase'
 import AppSwitcher from './AppSwitcher'
+import { useNavCollapsed } from './useNavCollapsed'
 import { FormDialog, Logo, PersonAvatar } from './common'
 
 const DRAWER_WIDTH = 248
+// Collapsed, the navigation is a rail just wide enough for its icons.
+const RAIL_WIDTH = 68
 
 interface NavItem {
   to: string
@@ -186,6 +192,12 @@ export default function Layout() {
   const desktop = useMediaQuery(theme.breakpoints.up('md'))
   const { pathname } = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
+  // On a wide screen the navigation folds to a rail of icons; the choice is
+  // remembered, and shared with the other Elevance apps.
+  const [collapsed, toggleCollapsed] = useNavCollapsed()
+  const rail = desktop && collapsed
+  const navWidth = rail ? RAIL_WIDTH : DRAWER_WIDTH
+  const navLabel = rail ? 'Expand navigation' : 'Collapse navigation'
   const [userMenu, setUserMenu] = useState<HTMLElement | null>(null)
   const [changingPassword, setChangingPassword] = useState(false)
   const [designation, setDesignation] = useState<string | null>(null)
@@ -227,36 +239,64 @@ export default function Layout() {
         return (
           <List
             key={section.title}
-            sx={{ px: 1.5 }}
+            sx={{ px: rail ? 1 : 1.5 }}
+            aria-label={section.title}
             subheader={
-              <ListSubheader disableSticky sx={{ bgcolor: 'transparent', lineHeight: '36px' }}>
-                {section.title}
-              </ListSubheader>
+              rail ? (
+                <Box sx={{ height: 12 }} />
+              ) : (
+                <ListSubheader disableSticky sx={{ bgcolor: 'transparent', lineHeight: '36px' }}>
+                  {section.title}
+                </ListSubheader>
+              )
             }
           >
             {items.map((item) => (
+              <Tooltip key={item.to} title={rail ? item.label : ''} placement="right">
               <ListItemButton
-                key={item.to}
                 component={Link}
                 to={item.to}
                 selected={item.to === activeTo}
+                aria-label={item.label}
                 onClick={() => setMobileOpen(false)}
                 sx={{
                   borderRadius: 2,
                   mb: 0.5,
+                  justifyContent: rail ? 'center' : 'flex-start',
                   '&.Mui-selected': {
                     color: 'primary.main',
                     '& .MuiListItemIcon-root': { color: 'primary.main' },
                   },
                 }}
               >
-                <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
-                <ListItemText primary={item.label} slotProps={{ primary: { sx: { fontWeight: 500 } } }} />
+                <ListItemIcon sx={{ minWidth: rail ? 0 : 40 }}>{item.icon}</ListItemIcon>
+                {!rail && <ListItemText primary={item.label} slotProps={{ primary: { sx: { fontWeight: 500 } } }} />}
               </ListItemButton>
+              </Tooltip>
             ))}
           </List>
         )
       })}
+      {/* Pinned to the foot of the navigation, where it stays put whether the
+          navigation is folded or not. Not a page, so not a list item. */}
+      {desktop && (
+        <Box sx={{ mt: 'auto', position: 'sticky', bottom: 0, p: 1, bgcolor: 'background.paper', borderTop: 1, borderColor: 'divider' }}>
+          <Tooltip title={rail ? navLabel : ''} placement="right">
+            <ButtonBase
+              onClick={toggleCollapsed}
+              aria-label={navLabel}
+              aria-expanded={!rail}
+              sx={{
+                width: '100%', borderRadius: 2, py: 1, px: rail ? 0 : 1.5, gap: 2, color: 'text.secondary',
+                justifyContent: rail ? 'center' : 'flex-start', '&:hover': { bgcolor: 'action.hover' },
+              }}
+            >
+              {rail ? <KeyboardDoubleArrowRightIcon /> : <KeyboardDoubleArrowLeftIcon />}
+              {!rail && <Typography variant="body2" sx={{ fontWeight: 500 }}>Collapse</Typography>}
+            </ButtonBase>
+          </Tooltip>
+        </Box>
+      )}
     </>
   )
 
@@ -268,7 +308,7 @@ export default function Layout() {
         elevation={0}
         sx={{ zIndex: theme.zIndex.drawer + 1, borderBottom: 1, borderColor: 'divider' }}
       >
-        <Toolbar sx={{ gap: 1.5 }}>
+        <Toolbar sx={{ gap: { xs: 0.75, sm: 1.5 } }}>
           {!desktop && (
             <IconButton edge="start" aria-label="Open navigation" onClick={() => setMobileOpen(true)}>
               <MenuIcon />
@@ -276,17 +316,18 @@ export default function Layout() {
           )}
           <AppSwitcher current="people" email={employee.company_email} />
           <Logo />
-          <Typography variant="h6" component="div" noWrap sx={{ flexGrow: 1 }}>
+          <Typography variant="h6" component="div" noWrap sx={{ display: { xs: 'none', sm: 'block' } }}>
             Elevance People
           </Typography>
+          <Box sx={{ flexGrow: 1 }} />
 
           <ButtonBase
             onClick={(e) => setUserMenu(e.currentTarget)}
             aria-label="Account menu"
-            sx={{ borderRadius: 6, py: 0.5, pl: 0.5, pr: 1, gap: 1.25, '&:hover': { bgcolor: 'action.hover' } }}
+            sx={{ borderRadius: 6, py: 0.5, pl: 0.5, pr: 1, gap: 1.25, flexShrink: 0, '&:hover': { bgcolor: 'action.hover' } }}
           >
             <PersonAvatar name={employee.full_name} size={34} />
-            <Box sx={{ textAlign: 'left', display: { xs: 'none', sm: 'block' } }}>
+            <Box sx={{ textAlign: 'left', display: { xs: 'none', md: 'block' } }}>
               <Typography variant="body2" sx={{ fontWeight: 500, lineHeight: 1.2 }}>
                 {employee.full_name}
               </Typography>
@@ -294,7 +335,7 @@ export default function Layout() {
                 {APP_ROLE_LABELS[employee.app_role]}
               </Typography>
             </Box>
-            <ExpandMoreIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+            <ExpandMoreIcon fontSize="small" sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }} />
           </ButtonBase>
           <Menu
             anchorEl={userMenu}
@@ -346,13 +387,13 @@ export default function Layout() {
         variant={desktop ? 'permanent' : 'temporary'}
         open={desktop || mobileOpen}
         onClose={() => setMobileOpen(false)}
-        sx={{ width: DRAWER_WIDTH, flexShrink: 0 }}
-        slotProps={{ paper: { sx: { width: DRAWER_WIDTH, boxSizing: 'border-box' } } }}
+        sx={{ width: navWidth, flexShrink: 0 }}
+        slotProps={{ paper: { sx: { width: desktop ? navWidth : DRAWER_WIDTH, boxSizing: 'border-box', overflowX: 'hidden' } } }}
       >
         {drawer}
       </Drawer>
 
-      <Box component="main" sx={{ flexGrow: 1, minWidth: 0, p: { xs: 2, md: 4 } }}>
+      <Box component="main" sx={{ flexGrow: 1, minWidth: 0, p: { xs: 2, md: 3 } }}>
         <Toolbar />
         <Outlet />
       </Box>

@@ -70,6 +70,16 @@ The tests run the real app in a simulated browser (jsdom) against an in-memory s
 3. Repo → Settings → Secrets and variables → Actions → **Variables**: add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. (The anon key is public by design; data is protected by row level security.) The build stops if either is missing, rather than deploying a blank page.
 4. Every push to `main` runs the checks, builds and deploys via `.github/workflows/deploy.yml`.
 
+## One look across the Elevance apps
+
+Work, Support and People wear the same shell, so switching between them does not feel like changing product:
+
+- **Header**: the app switcher, the app's logo and name on the left; your avatar with your name and role on the right, opening a menu that starts with who you are.
+- **Navigation** on the left, with the current page tinted. **Collapse**, at its foot, folds it to a rail of icons (hover one for its name) and expands it again. The choice is remembered and shared by the three apps, so the screen keeps its shape as you switch.
+- **Type and colour**: Roboto, bold page titles, the same indigo, corners, buttons and table headings.
+
+The look is set in `src/theme` and the shell in the layout component of each app. They are kept the same by hand: a change to one belongs in all three.
+
 ## Switching between the Elevance apps
 
 The grid icon at the top left opens the **app switcher**: Work, Support and People. Picking one opens that app; the one you are in is marked *You are here*.

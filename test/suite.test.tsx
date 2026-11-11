@@ -1,7 +1,7 @@
 // The suite: the switcher that leads to the sibling apps, and arriving from
 // one. Each app keeps its own session, so the hand-over is a link carrying the
 // person's company email, which the receiving app gives Google as a hint.
-import { setupDom, reporter, text, click, settle } from './setup'
+import { setupDom, reporter, text, click, settle, navLabels } from './setup'
 // Arriving from a sibling app, signed out here, at a deep link.
 setupDom('http://localhost/elevance-people/?sso=Sara@ElevanceLabs.com#/dashboard')
 
@@ -87,5 +87,38 @@ check('the others are links to the sibling apps, carrying the signed-in email',
   others.join() === placed.join() && others.length === 2, `${others.join(' | ')} vs ${placed.join(' | ')}`)
 check('by default those are the folders beside this one',
   suiteLinks('people', 'http://localhost/elevance-people/').filter((l) => !l.current).every((l) => /^http:\/\/localhost\/elevance-(work|support|people)\/$/.test(l.url)))
+
+// ---------------- the shell: one header, one collapsible navigation ----------------
+// The three apps wear the same shell, so switching does not rearrange the screen.
+const toolbar = [...(document.querySelector('header .MuiToolbar-root')?.children ?? [])]
+const order = (sel: string) => toolbar.findIndex((el) => el.matches(sel) || el.querySelector(sel) !== null)
+check('the header opens with the app switcher, then the logo',
+  order('[aria-label="Switch app"]') === 0 && order('.MuiAvatar-rounded') === 1,
+  toolbar.map((el) => el.getAttribute('aria-label') ?? el.className.slice(0, 24)).join(' | '))
+const account = document.querySelector('[aria-label="Account menu"]')
+check('the account button is the avatar with the name and role beside it',
+  account?.querySelector('.MuiAvatar-root') !== null && account?.textContent?.includes(PEOPLE.member.full_name) === true, account?.textContent ?? '')
+const selected = document.querySelector('.MuiDrawer-root .Mui-selected')
+check('the current page is tinted in the navigation, not filled',
+  selected !== null && selected.getAttribute('aria-label') === 'Dashboard', selected?.outerHTML.slice(0, 120))
+
+const foot = document.querySelector('.MuiDrawer-root [aria-label="Collapse navigation"]')
+check('the collapse toggle sits at the foot of the navigation, after every page',
+  foot !== null && [...document.querySelectorAll('.MuiDrawer-root a[aria-label]')].every((a) => a.compareDocumentPosition(foot) & 4))
+const labelsBefore = navLabels()
+window.localStorage.removeItem('elevance.nav-collapsed')
+await click(document.querySelector('[aria-label="Collapse navigation"]'))
+await settle()
+check('collapsing folds the navigation to icons', labelsBefore.length > 0 && navLabels().length === 0, navLabels().join())
+check('every page is still there, named for a screen reader and a tooltip',
+  [...document.querySelectorAll('.MuiDrawer-root a[aria-label]')].length >= labelsBefore.length)
+check('the toggle now expands', document.querySelector('[aria-label="Expand navigation"]') !== null)
+check('the choice is remembered, under the key the apps share', window.localStorage.getItem('elevance.nav-collapsed') === '1')
+await mountApp('/dashboard')
+check('a fresh load stays collapsed', navLabels().length === 0 && document.querySelector('[aria-label="Expand navigation"]') !== null)
+await click(document.querySelector('[aria-label="Expand navigation"]'))
+await settle()
+check('expanding brings the labels back', navLabels().join() === labelsBefore.join(), navLabels().join())
+check('and that is remembered too', window.localStorage.getItem('elevance.nav-collapsed') === '0')
 
 done()
