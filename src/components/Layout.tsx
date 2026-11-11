@@ -64,6 +64,7 @@ import { supabase } from '../lib/supabase'
 import AppSwitcher from './AppSwitcher'
 import { useNavCollapsed } from './useNavCollapsed'
 import { FormDialog, Logo, PersonAvatar } from './common'
+import { InstallBanner, InstallNavButton } from './InstallApp'
 
 const DRAWER_WIDTH = 248
 // Collapsed, the navigation is a rail just wide enough for its icons.
@@ -224,6 +225,8 @@ export default function Layout() {
   const drawer = (
     <>
       <Toolbar />
+      {/* On a phone the offer to install leads the navigation, until dismissed. */}
+      {!desktop && <InstallBanner />}
       {NAV.map((section) => {
         const items = section.items.filter(
           (item) =>
@@ -278,23 +281,31 @@ export default function Layout() {
         )
       })}
       {/* Pinned to the foot of the navigation, where it stays put whether the
-          navigation is folded or not. Not a page, so not a list item. */}
+          navigation is folded or not. Not a page, so not a list item. Install
+          shares the row, after Collapse; on the rail it sits above it. */}
       {desktop && (
-        <Box sx={{ mt: 'auto', position: 'sticky', bottom: 0, p: 1, bgcolor: 'background.paper', borderTop: 1, borderColor: 'divider' }}>
+        <Box
+          sx={{
+            mt: 'auto', position: 'sticky', bottom: 0, p: 1, bgcolor: 'background.paper', borderTop: 1, borderColor: 'divider',
+            display: 'flex', flexDirection: rail ? 'column' : 'row', gap: 0.5,
+          }}
+        >
+          {rail && <InstallNavButton rail />}
           <Tooltip title={rail ? navLabel : ''} placement="right">
             <ButtonBase
               onClick={toggleCollapsed}
               aria-label={navLabel}
               aria-expanded={!rail}
               sx={{
-                width: '100%', borderRadius: 2, py: 1, px: rail ? 0 : 1.5, gap: 2, color: 'text.secondary',
+                flex: rail ? 'none' : 1, minWidth: 0, borderRadius: 2, py: 1, px: rail ? 0 : 1.25, gap: 1.5, color: 'text.secondary',
                 justifyContent: rail ? 'center' : 'flex-start', '&:hover': { bgcolor: 'action.hover' },
               }}
             >
               {rail ? <KeyboardDoubleArrowRightIcon /> : <KeyboardDoubleArrowLeftIcon />}
-              {!rail && <Typography variant="body2" sx={{ fontWeight: 500 }}>Collapse</Typography>}
+              {!rail && <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>Collapse</Typography>}
             </ButtonBase>
           </Tooltip>
+          {!rail && <InstallNavButton rail={false} />}
         </Box>
       )}
     </>

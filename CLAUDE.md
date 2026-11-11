@@ -113,8 +113,11 @@ behaviour).
   the address and, with no session, goes to Google with `login_hint` and no
   chooser. The hint is never trusted: binding decides who gets in.
 - **Installable (PWA).** `vite.pwa.ts` (build plugin, no dependency) emits
-  `manifest.webmanifest` and `sw.js`; `src/pwa.ts` registers it and
-  `components/UpdatePrompt` offers a waiting build. The worker caches the
+  `manifest.webmanifest` and `sw.js`; `src/pwa.ts` registers it, keeps the
+  browser's install offer, and `components/UpdatePrompt` offers a waiting build.
+  `components/InstallApp` is the Install button (nav foot beside Collapse;
+  a dismissible banner atop the phone navigation): the browser's dialog where
+  it has one, else steps from `lib/install.ts`; hidden when running installed. The worker caches the
   app's own files only, **never a Supabase response**, and stays inside its
   own folder (sibling apps share the origin). Not registered on the public
   job page (`#/careers`). Icons in `public/icons/`.
@@ -280,6 +283,8 @@ behaviour).
 - `constants.ts` — company domain, handbook doc URLs, enum labels/colours (role, status,
   employment type), document types and upload limits, number/date formatting.
   Dates are plain `YYYY-MM-DD`, parsed as local time.
+- `install.ts` — the device and browser (`detectDevice`), running installed
+  or in a tab (`isStandalone`), the install steps for each (`installGuide`).
 - `leaves.ts` — leave select with its type, client mirror of the working-day
   count (weekends and holidays out), holiday columns and helpers, year
   helpers, balance maths, leave and holiday error messages.
