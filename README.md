@@ -87,6 +87,7 @@ Elevance People can be **installed** (a PWA): *Install app* in Chrome or Edge's 
 
 - **What is kept on the device** is the app itself (scripts, styles, fonts, icons), so it opens at once. **Nothing from Supabase is ever cached**: every record is fetched each time, and none of it is readable offline. Without a connection the app opens and shows nothing.
 - **A new version waits to be asked.** After a deploy the app says *"A new version is available"* with a **Reload** button. Until you press it, or close every window of the app, you keep the build you started with.
+- **Opening the app always asks for the latest page.** The copy kept on the device is used only with no connection, so a deploy shows the next time the app is opened; the prompt above is for an app that is already open.
 - **The public job page installs nothing.** An applicant's browser is never given the service worker.
 - No working offline, no push notifications.
 
