@@ -1,5 +1,5 @@
-import { BRANDING_BUCKET, supabase } from './supabase'
-import { COMPANY_DOMAIN, STAGE_LABELS } from './constants'
+import { BRANDING_BUCKET, TEST_FILES_BUCKET, supabase } from './supabase'
+import { COMPANY_DOMAIN, STAGE_LABELS, TEST_FILE_ACCEPT, TEST_FILE_MAX_BYTES } from './constants'
 import type { ApplicationStage, ApplicationStageEvent, DirectoryEntry, JobApplication, JobOpening } from './types'
 
 export type JobOpeningWithNames = JobOpening & {
@@ -170,6 +170,54 @@ export function interviewScores(events: ApplicationStageEvent[]) {
   }))
   const combined = questions.length ? questions.reduce((s, q) => s + q.percent, 0) / questions.length : null
   return { interviews, questions, combined }
+}
+
+// ---------------------------------------------------------------------------
+// Test files: the submitted test, attached by HR or the job's hiring manager
+// (can_attach_test_files). application_add_test_file / _remove_test_file and
+// application_move decide; these mirror them.
+// ---------------------------------------------------------------------------
+
+export const MAX_TEST_FILES = 3
+
+// Moving on from the test, except to rejected or abandoned, needs a file.
+export const needsTestFile = (from: ApplicationStage, to: ApplicationStage | '') =>
+  from === 'test' && !!to && to !== 'rejected' && to !== 'abandoned'
+
+// Mirrors application_passed_test: once it has moved on from the test, the
+// application keeps at least one file.
+export const passedTest = (events: ApplicationStageEvent[]) =>
+  events.some((e) => e.kind === 'move' && !e.undone_at && needsTestFile(e.from_stage, e.to_stage))
+
+export function testFileProblem(file: File) {
+  if (!TEST_FILE_ACCEPT.split(',').includes(file.type)) return 'Test files must be PDFs or JPEG, PNG or WebP images.'
+  if (file.size > TEST_FILE_MAX_BYTES) return 'Test files must be 5 MB or smaller.'
+  return null
+}
+
+// Upload into the application's folder under a fresh name, then attach it;
+// the upload is removed if attaching fails.
+export async function attachTestFile(applicationId: string, file: File) {
+  const ext = file.type === 'application/pdf' ? 'pdf' : file.type.split('/')[1].replace('jpeg', 'jpg')
+  const path = `${applicationId}/${crypto.randomUUID()}.${ext}`
+  const bucket = supabase.storage.from(TEST_FILES_BUCKET)
+  const { error: uploadError } = await bucket.upload(path, file, { contentType: file.type })
+  if (uploadError) return uploadError
+  const { error } = await supabase.rpc('application_add_test_file', {
+    p_application_id: applicationId,
+    p_path: path,
+    p_name: file.name,
+  })
+  if (error) await bucket.remove([path])
+  return error
+}
+
+// Detach it, then remove the file (only allowed once no row points at it).
+export async function removeTestFile(id: string) {
+  const { data: path, error } = await supabase.rpc('application_remove_test_file', { p_file_id: id })
+  if (error) return error
+  if (path) await supabase.storage.from(TEST_FILES_BUCKET).remove([path as string])
+  return null
 }
 
 // Every column but the salaries and HR's notes, which clients can't select.

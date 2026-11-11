@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { COMPANY_DOMAIN } from '../lib/constants'
+import { SSO_PARAM, ssoHint } from '../lib/suite'
 import type { Employee } from '../lib/types'
 
 interface AuthState {
@@ -44,6 +45,21 @@ function readOAuthError(): string | null {
   return fromQuery ?? fromHash
 }
 
+// A sibling app's switcher hands the person over with their company email in
+// the address (`?sso=`). It is read once, as the page loads, and taken out of
+// the address so that a reload, a bookmark or the return from Google never
+// carries it again.
+function takeSsoHint(): string | null {
+  const url = new URL(window.location.href)
+  if (!url.searchParams.has(SSO_PARAM)) return null
+  const hint = ssoHint(url.search, COMPANY_DOMAIN)
+  url.searchParams.delete(SSO_PARAM)
+  window.history.replaceState(window.history.state, '', url)
+  return hint
+}
+const handedOver = takeSsoHint()
+let handOverStarted = false
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
@@ -52,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isHiringTeam, setIsHiringTeam] = useState(false)
   const [binding, setBinding] = useState(false)
   const [error, setError] = useState<string | null>(readOAuthError)
+  const [handOverFailed, setHandOverFailed] = useState(false)
   const [recovering, setRecovering] = useState(false)
 
   useEffect(() => {
@@ -63,6 +80,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
     return () => data.subscription.unsubscribe()
   }, [])
+
+  // Handed over from a sibling app with no session here: go straight to
+  // Google, naming the account, with no chooser. Google already knows them, so
+  // it comes back signed in without showing a screen. Tried once per page
+  // load; whatever Google returns, the address no longer carries the hint.
+  const handingOver = sessionReady && !userId && handedOver !== null && !handOverFailed
+  useEffect(() => {
+    if (!handingOver || handOverStarted) return
+    handOverStarted = true
+    supabase.auth
+      .signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin + window.location.pathname,
+          queryParams: { hd: COMPANY_DOMAIN, login_hint: handedOver as string },
+        },
+      })
+      .then(({ error: signInError }) => {
+        if (!signInError) return
+        setError(signInError.message)
+        setHandOverFailed(true)
+      })
+  }, [handingOver])
 
   // A session alone is not enough: the user must match a login-eligible employee record.
   useEffect(() => {
@@ -106,7 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const role = employee?.app_role
   const value = useMemo<AuthState>(
     () => ({
-      loading: !sessionReady || binding || (!!userId && !employee),
+      loading: !sessionReady || binding || handingOver || (!!userId && !employee),
       employee,
       error,
       isHr: role === 'hr_admin' || role === 'company_admin',
@@ -147,7 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await supabase.auth.signOut()
       },
     }),
-    [sessionReady, binding, userId, employee, role, isManager, isHiringTeam, error, recovering],
+    [sessionReady, binding, handingOver, userId, employee, role, isManager, isHiringTeam, error, recovering],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

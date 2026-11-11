@@ -58,6 +58,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { APP_ROLE_LABELS } from '../lib/constants'
 import { PASSWORD_MIN_LENGTH } from '../lib/passwordLogin'
 import { supabase } from '../lib/supabase'
+import AppSwitcher from './AppSwitcher'
 import { FormDialog, Logo, PersonAvatar } from './common'
 
 const DRAWER_WIDTH = 248
@@ -273,6 +274,7 @@ export default function Layout() {
               <MenuIcon />
             </IconButton>
           )}
+          <AppSwitcher current="people" email={employee.company_email} />
           <Logo />
           <Typography variant="h6" component="div" noWrap sx={{ flexGrow: 1 }}>
             Elevance People

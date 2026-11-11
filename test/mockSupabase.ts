@@ -25,6 +25,7 @@ interface Result {
 
 export const DOCS_BUCKET = 'employee-docs'
 export const APPLICATIONS_BUCKET = 'job-applications'
+export const TEST_FILES_BUCKET = 'application-tests'
 export const BRANDING_BUCKET = 'branding'
 export const EQUIPMENT_BUCKET = 'equipment'
 export const REIMBURSEMENTS_BUCKET = 'reimbursements'
@@ -1193,6 +1194,21 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     })
     Object.assign(a, { stage, stage_changed_at: new Date().toISOString() })
     return null
+  },
+
+  // Attach an uploaded test file; detach one, handing back its path.
+  application_add_test_file: ({ p_application_id, p_path, p_name }) => {
+    const id = `tf-${nextId++}`
+    rowsIn('application_test_files').push({
+      id, application_id: p_application_id, storage_path: p_path, file_name: p_name,
+      uploaded_by: authState.bound?.id ?? null, created_at: new Date().toISOString(),
+    })
+    return id
+  },
+  application_remove_test_file: ({ p_file_id: id }) => {
+    const files = rowsIn('application_test_files')
+    const i = files.findIndex((f) => f.id === id)
+    return i < 0 ? null : files.splice(i, 1)[0].storage_path
   },
 
   // Back to where the last move not yet undone came from.

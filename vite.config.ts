@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { pwa } from './vite.pwa'
 
 // GitHub Pages can't send response headers, so the built page carries its
 // Content Security Policy as a meta tag. Only scripts from the app itself run;
@@ -34,5 +35,18 @@ function contentSecurityPolicy(supabaseUrl: string | undefined): Plugin {
 export default defineConfig(({ mode }) => ({
   // Relative base so the build works under any GitHub Pages sub-path.
   base: './',
-  plugins: [react(), contentSecurityPolicy(loadEnv(mode, process.cwd()).VITE_SUPABASE_URL)],
+  plugins: [
+    react(),
+    contentSecurityPolicy(loadEnv(mode, process.cwd()).VITE_SUPABASE_URL),
+    // Installable. The service worker keeps the app's own files only; it never
+    // answers for, or stores, anything from Supabase.
+    pwa({
+      id: 'el-people',
+      name: 'Elevance People',
+      shortName: 'People',
+      description: 'The Elevance Labs employee portal',
+      themeColor: '#3f51b5',
+      backgroundColor: '#f6f7fb',
+    }),
+  ],
 }))

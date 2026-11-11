@@ -229,6 +229,10 @@ export const DOC_MAX_BYTES = 10 * 1024 * 1024
 
 // Mirrored by the job-applications and branding buckets' limits.
 export const CV_MAX_BYTES = 6 * 1024 * 1024
+// Mirrored by the application-tests bucket's limits: submitted tests are
+// images or PDFs.
+export const TEST_FILE_ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf'
+export const TEST_FILE_MAX_BYTES = 5 * 1024 * 1024
 export const LOGO_ACCEPT = 'image/png,image/jpeg,image/webp'
 export const LOGO_MAX_BYTES = 2 * 1024 * 1024
 

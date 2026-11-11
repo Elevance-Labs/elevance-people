@@ -34,6 +34,7 @@ import { payslipPdf, type PayslipCompany, type PayslipPerson } from '../../lib/p
 import { COMPANY_DETAIL_COLUMNS, EMPTY_COMPANY_DETAILS } from '../../lib/branding'
 import { DEFAULT_PRIMARY } from '../../theme'
 import type { Payslip } from '../../lib/types'
+import { usePhone } from '../../components/usePhone'
 
 function Lines({ title, lines, total }: { title: string; lines: PayslipLine[]; total: PayslipLine }) {
   return (
@@ -68,6 +69,7 @@ function Lines({ title, lines, total }: { title: string; lines: PayslipLine[]; t
 // payroll (my_payslips; the payroll tables themselves are HR and finance
 // only). A row opens the breakdown; either downloads the PDF.
 export default function Payslips({ person }: { person: PayslipPerson }) {
+  const phone = usePhone()
   const [slips, setSlips] = useState<Payslip[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState<Payslip | null>(null)
@@ -167,7 +169,7 @@ export default function Payslips({ person }: { person: PayslipPerson }) {
         </TableContainer>
       </Paper>
 
-      <Dialog open={!!open} onClose={() => setOpen(null)} maxWidth="sm" fullWidth>
+      <Dialog open={!!open} onClose={() => setOpen(null)} maxWidth="sm" fullWidth fullScreen={phone}>
         <DialogTitle>Payslip · {open && periodLabel(open)}</DialogTitle>
         {open && breakdown && (
           <DialogContent>

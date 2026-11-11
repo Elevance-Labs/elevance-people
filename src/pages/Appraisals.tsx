@@ -28,6 +28,7 @@ import {
 import AddIcon from '@mui/icons-material/Add'
 import { useAuth } from '../auth/AuthProvider'
 import { ConfirmDialog, FormDialog, PageHeader, PersonAvatar } from '../components/common'
+import { usePhone } from '../components/usePhone'
 import { supabase } from '../lib/supabase'
 import { SALARY_REVISION_STATUS_LABELS, formatDate } from '../lib/constants'
 import { formatAmount } from '../lib/payroll'
@@ -62,6 +63,7 @@ type Action = { kind: 'review' | 'approve' | 'reject' | 'delete'; revision: Sala
 export default function Appraisals() {
   const { employee, isCompanyAdmin } = useAuth()
   const me = employee!.id
+  const phone = usePhone()
   const [params, setParams] = useSearchParams()
   const status = TABS.find((s) => s === params.get('status')) ?? 'draft'
   const [rows, setRows] = useState<SalaryRevision[]>([])
@@ -451,7 +453,7 @@ export default function Appraisals() {
         />
       </FormDialog>
 
-      <Dialog open={!!history} onClose={() => setHistory(null)} fullWidth maxWidth="sm">
+      <Dialog open={!!history} onClose={() => setHistory(null)} fullWidth maxWidth="sm" fullScreen={phone}>
         <DialogTitle>Salary history · {history && nameOf(history)}</DialogTitle>
         <DialogContent>
           {historyRows.length ? (

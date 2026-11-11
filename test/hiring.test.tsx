@@ -443,6 +443,10 @@ check('switching job loads that job’s board', location.search === '?job=j-draf
 // ---------------- an interviewer ----------------
 reset()
 signInAs(PEOPLE.member) // Sara interviews for Frontend Engineer
+table('application_test_files').push({
+  id: 'tf-int', application_id: 'a-int', storage_path: 'a-int/1111.pdf', file_name: 'take-home.pdf',
+  uploaded_by: 'e-bilal', created_at: '2026-05-21T09:00:00Z',
+})
 await mountApp('/applications?job=j-open')
 check('an interviewer sees only shortlisted through cleared', columnLabels().join() ===
   'Shortlisted,Test,Interview 1,Interview 2,Interview 3,Cleared', columnLabels().join())
@@ -453,6 +457,14 @@ check('an interviewer doesn’t see the salaries or HR’s notes',
   !dialog()?.textContent?.includes('300,000') && !dialog()?.textContent?.includes('260,000') &&
   !dialog()?.textContent?.includes('HR notes') && !dialog()?.textContent?.includes('Notice period of one month.'))
 check('…can’t undo', !buttons('Undo: back to Test', dialog()!).length && !dialog()?.textContent?.includes('Undo'))
+const testFiles = () => document.querySelector<HTMLElement>('[aria-label="Test files"]')
+check('an interviewer sees the submitted test, through a signed link',
+  await waitFor(() => testFiles()?.querySelector('a')?.getAttribute('href') ===
+    'https://signed.example/application-tests/a-int/1111.pdf') && testFiles()!.textContent!.includes('take-home.pdf'),
+  testFiles()?.innerHTML)
+check('…but can’t attach or remove one',
+  !button('Attach test', testFiles()!) && !button('Remove take-home.pdf', testFiles()!) &&
+  !dialog()!.querySelector('input[type="file"]'))
 await openMoveTo()
 check('…and can move an interview on',
   options().map((o) => o.textContent).join() === 'Interview 2,Cleared,Shelf,Rejected,Abandoned',
@@ -508,19 +520,56 @@ table('job_applications').push({
 })
 await mountApp('/applications?job=j-open&application=a-test')
 await waitFor(() => !!dialog())
+check('HR gets a place for the submitted test, empty at first',
+  !!testFiles() && testFiles()!.textContent!.includes('None attached yet.') && !!button('Attach test', testFiles()!))
 await openMoveTo()
 await click(options().find((o) => o.textContent === 'Abandoned'))
-check('abandoning at the test asks for no score', !dialog()!.querySelector('[aria-label="Test score"]'))
+check('abandoning at the test asks for no score, and no test file',
+  !dialog()!.querySelector('[aria-label="Test score"]') && !dialog()!.textContent!.includes('Attach the submitted test'))
+await openMoveTo()
+await click(options().find((o) => o.textContent === 'Rejected'))
+check('…nor does rejecting need a test file', !dialog()!.textContent!.includes('Attach the submitted test'))
 await openMoveTo()
 await click(options().find((o) => o.textContent === 'Interview 1'))
 check('moving on from the test asks for a score of 1 to 5, and still for remarks',
   dialog()!.querySelector('[aria-label="Test score"]')?.querySelectorAll('button').length === 5 && !!remarks()?.required &&
   !dialog()!.querySelector('[aria-label^="Rating for"]'))
+check('…and says the submitted test must be attached first',
+  dialog()!.textContent!.includes('Attach the submitted test below before moving on.'))
 await type('Remarks', 'Solid take-home', dialog()!)
-await click(button('Move', dialog()!))
-check('…and won’t move without the score', !captured.rpcs.some((r) => r.name === 'application_move') &&
-  dialog()!.textContent!.includes('Give the test a score from 1 to 5.'))
 await click(button('4', dialog()!.querySelector('[aria-label="Test score"]')!))
+await click(button('Move', dialog()!))
+check('…and won’t move without it', !captured.rpcs.some((r) => r.name === 'application_move') &&
+  dialog()!.textContent!.includes('Attach the submitted test before moving on to Interview 1.'))
+
+const big = pdf('test.pdf')
+Object.defineProperty(big, 'size', { value: 5 * 1024 * 1024 + 1 })
+await pickFile(big)
+check('a test file over 5 MB is refused before uploading', !captured.uploads.length &&
+  dialog()!.textContent!.includes('Test files must be 5 MB or smaller.'))
+await pickFile(pdf('test.docx', 'application/msword'))
+check('…as is anything but a PDF or an image', !captured.uploads.length &&
+  dialog()!.textContent!.includes('Test files must be PDFs or JPEG, PNG or WebP images.'))
+failNext('rpc.application_add_test_file', { message: 'Upload the file before attaching it.' })
+await pickFile(pdf('take-home.pdf'))
+const firstUpload = captured.uploads[0]
+check('if attaching fails, the upload is removed',
+  firstUpload?.bucket === 'application-tests' && /^a-test\/[0-9a-f-]{36}\.pdf$/.test(firstUpload.path) &&
+  JSON.stringify(captured.removals) === JSON.stringify([{ bucket: 'application-tests', paths: [firstUpload.path] }]) &&
+  dialog()!.textContent!.includes('take-home.pdf couldn’t be attached'), JSON.stringify(captured.removals))
+await pickFile(pdf('take-home.pdf'))
+const testUpload = captured.uploads[1]
+check('a test file is uploaded into the application’s folder, then attached with its name',
+  testUpload?.bucket === 'application-tests' && /^a-test\/[0-9a-f-]{36}\.pdf$/.test(testUpload.path) &&
+  testUpload.contentType === 'application/pdf' &&
+  JSON.stringify(captured.rpcs.filter((r) => r.name === 'application_add_test_file').at(-1)?.args) ===
+    JSON.stringify({ p_application_id: 'a-test', p_path: testUpload.path, p_name: 'take-home.pdf' }),
+  JSON.stringify(captured.rpcs.filter((r) => r.name === 'application_add_test_file')))
+check('…and listed with who attached it', await waitFor(() =>
+  !!testFiles()!.querySelector(`a[href="https://signed.example/application-tests/${testUpload.path}"]`) &&
+  testFiles()!.textContent!.includes('take-home.pdf') && testFiles()!.textContent!.includes('Bilal Ahmed')),
+  testFiles()!.textContent)
+check('…and the move form stops asking for it', !dialog()!.textContent!.includes('Attach the submitted test below'))
 await click(button('Move', dialog()!))
 check('…then sends it with the move',
   JSON.stringify(captured.rpcs.find((r) => r.name === 'application_move')?.args) ===
@@ -528,6 +577,25 @@ check('…then sends it with the move',
   JSON.stringify(captured.rpcs.filter((r) => r.name === 'application_move')))
 check('the test score shows, with no interview score yet',
   await waitFor(() => scoreOf('Test score') === '4/5') && !dialog()!.querySelector('[aria-label="Combined interview score"]'))
+check('once moved on from the test, its only file can’t be removed',
+  (button('Remove take-home.pdf', testFiles()!) as HTMLButtonElement).disabled)
+check('…but more can still be attached', !!button('Attach test', testFiles()!))
+await pickFile(pdf('screenshot.png', 'image/png'))
+await pickFile(pdf('notes.pdf'))
+check('up to three, after which there’s no Attach',
+  await waitFor(() => testFiles()!.querySelectorAll('li').length === 3) && !button('Attach test', testFiles()!) &&
+  captured.uploads.at(-2)?.path.endsWith('.png'))
+await click(button('Remove screenshot.png', testFiles()!))
+await click(button('Remove'))
+const removed = captured.rpcs.filter((r) => r.name === 'application_remove_test_file').at(-1)?.args
+check('with more than one, a file can be removed: detached, then deleted from storage',
+  typeof removed?.p_file_id === 'string' &&
+  captured.removals.at(-1)?.bucket === 'application-tests' && captured.removals.at(-1)?.paths[0]?.endsWith('.png') &&
+  captured.calls.lastIndexOf('rpc.application_remove_test_file') < captured.calls.lastIndexOf('storage.remove'),
+  JSON.stringify(captured.removals))
+await waitFor(() => document.querySelectorAll('[role="dialog"]').length === 1)
+check('…and it leaves the list', await waitFor(() => testFiles()!.querySelectorAll('li').length === 2 &&
+  !testFiles()!.textContent!.includes('screenshot.png')) && !!button('Attach test', testFiles()!))
 await openMoveTo()
 await click(options().find((o) => o.textContent === 'Cleared'))
 await type('Remarks', 'Great fit', dialog()!)
@@ -558,5 +626,10 @@ check('…and the current salary and HR’s notes, read-only',
   dialog()?.querySelector('[aria-label="Current salary"]')?.textContent === 'PKR 260,000' &&
   dialog()?.querySelector('[aria-label="HR notes"]')?.textContent === 'Notice period of one month.' &&
   !field('Notes', dialog()!) && !field('Current salary', dialog()!) && !button('Save', dialog()!))
+check('the hiring manager can attach the submitted test, at any stage they see',
+  !!button('Attach test', dialog()!.querySelector<HTMLElement>('[aria-label="Test files"]')!))
+await pickFile(pdf('take-home.pdf'))
+check('…which goes through application_add_test_file',
+  captured.rpcs.some((r) => r.name === 'application_add_test_file' && r.args?.p_application_id === 'a-int'))
 
 done()

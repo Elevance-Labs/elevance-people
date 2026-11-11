@@ -34,6 +34,7 @@ import {
   uploadReimbursementFile,
 } from '../lib/reimbursements'
 import type { Reimbursement, ReimbursementStatus } from '../lib/types'
+import { usePhone } from './usePhone'
 
 export function ReimbursementStatusChip({
   status,
@@ -170,6 +171,7 @@ export function ReimbursementDialog({
     if (!problem) setProof(file)
   }
 
+  const phone = usePhone()
   const history: [string, string | null, string | null][] = [
     ['Submitted', claim.created_by ?? claim.employee_id, claim.created_at],
     ['Approved', claim.approved_by, claim.approved_at],
@@ -180,7 +182,7 @@ export function ReimbursementDialog({
   ]
 
   return (
-    <Dialog open onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth>
+    <Dialog open onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth fullScreen={phone}>
       <DialogTitle sx={{ pr: 7 }}>
         {own ? 'Your claim' : `${nameOf(claim.employee_id)}’s claim`}
       </DialogTitle>

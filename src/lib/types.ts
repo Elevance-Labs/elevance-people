@@ -255,6 +255,17 @@ export interface ApplicationStageEvent {
   interview_ratings: number[] | null
 }
 
+// A submitted test on an application, in the application-tests bucket.
+// Written only by application_add_test_file / application_remove_test_file.
+export interface ApplicationTestFile {
+  id: string
+  application_id: string
+  storage_path: string
+  file_name: string
+  uploaded_by: string | null
+  created_at: string
+}
+
 // A row of the job_posting RPC: an open job as the public page shows it.
 export interface JobPosting {
   id: string

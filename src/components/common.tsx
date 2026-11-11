@@ -21,6 +21,7 @@ import CloseIcon from '@mui/icons-material/Close'
 import GroupsIcon from '@mui/icons-material/Groups'
 import { JOB_STATUS_COLORS, JOB_STATUS_LABELS, STATUS_COLORS, STATUS_LABELS } from '../lib/constants'
 import type { EmployeeStatus, JobOpeningStatus } from '../lib/types'
+import { usePhone } from './usePhone'
 
 export function Logo({ size = 32 }: { size?: number }) {
   return (
@@ -169,12 +170,16 @@ export function FormDialog({
   onClose: () => void
   children: ReactNode
 }) {
+  // A form takes the whole screen on a phone, where a dialog's margins would
+  // leave its fields a sliver.
+  const phone = usePhone()
   return (
     <Dialog
       open={open}
       onClose={busy || closeButton ? undefined : onClose}
       maxWidth="sm"
       fullWidth
+      fullScreen={phone}
       slotProps={{
         paper: {
           component: 'form',

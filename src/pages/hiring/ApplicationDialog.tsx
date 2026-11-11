@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Alert,
@@ -21,7 +21,9 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material'
+import AttachFileIcon from '@mui/icons-material/AttachFile'
 import CloseIcon from '@mui/icons-material/Close'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined'
 import EmailOutlinedIcon from '@mui/icons-material/EmailOutlined'
 import EventOutlinedIcon from '@mui/icons-material/EventOutlined'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
@@ -30,30 +32,43 @@ import PhoneOutlinedIcon from '@mui/icons-material/PhoneOutlined'
 import UndoIcon from '@mui/icons-material/Undo'
 import WorkOutlineIcon from '@mui/icons-material/WorkOutlined'
 import { useAuth } from '../../auth/AuthProvider'
-import { FormDialog, PersonAvatar } from '../../components/common'
-import { APPLICATIONS_BUCKET, supabase } from '../../lib/supabase'
+import { ConfirmDialog, FormDialog, PersonAvatar } from '../../components/common'
+import { APPLICATIONS_BUCKET, TEST_FILES_BUCKET, supabase } from '../../lib/supabase'
 import {
   COMPANY_DOMAIN,
   STAGE_COLORS,
   STAGE_LABELS,
+  TEST_FILE_ACCEPT,
   formatDay,
   formatDayTime,
   formatPkr,
 } from '../../lib/constants'
 import {
+  MAX_TEST_FILES,
   NEEDS_REASON,
   NEEDS_TEXT,
   NEXT_STAGES,
+  attachTestFile,
   canMoveFrom,
   hireError,
   interviewScores,
+  needsTestFile,
+  passedTest,
+  removeTestFile,
   scoresNeeded,
+  testFileProblem,
   testScore,
   undoableMove,
   type ApplicationHrDetails,
   type BoardApplication,
 } from '../../lib/hiring'
-import type { ApplicationStage, ApplicationStageEvent, DirectoryEntry, Onboarding } from '../../lib/types'
+import type {
+  ApplicationStage,
+  ApplicationStageEvent,
+  ApplicationTestFile,
+  DirectoryEntry,
+  Onboarding,
+} from '../../lib/types'
 
 // Long enough to read a CV without the viewer's link expiring.
 const CV_URL_SECONDS = 60 * 60
@@ -99,6 +114,7 @@ export default function ApplicationDialog({
   jobTitle,
   interviewQuestions,
   people,
+  canAttachTests,
   onMoved,
   onClose,
 }: {
@@ -107,6 +123,8 @@ export default function ApplicationDialog({
   // The job's questions, each rated on a move on from an interview.
   interviewQuestions: string[]
   people: DirectoryEntry[]
+  // HR or the job's hiring manager: may attach and remove test files.
+  canAttachTests: boolean
   onMoved: (stage: ApplicationStage) => Promise<void>
   onClose: () => void
 }) {
@@ -134,6 +152,11 @@ export default function ApplicationDialog({
   const [joining, setJoining] = useState('')
   // The onboarding a hire started; undefined until known.
   const [hire, setHire] = useState<Pick<Onboarding, 'id' | 'employee_id'> | null | undefined>(undefined)
+  // The submitted test, each with a signed link to open it.
+  const [testFiles, setTestFiles] = useState<(ApplicationTestFile & { url: string | null })[]>([])
+  const [attaching, setAttaching] = useState(false)
+  const [removing, setRemoving] = useState<ApplicationTestFile | null>(null)
+  const testInput = useRef<HTMLInputElement>(null)
 
   const nameOf = (id: string | null) => people.find((p) => p.id === id)?.full_name ?? 'Someone'
 
@@ -146,6 +169,25 @@ export default function ApplicationDialog({
     if (loadError) setError(loadError.message)
     else setEvents(data as ApplicationStageEvent[])
   }, [a.id])
+
+  const loadTestFiles = useCallback(async () => {
+    const { data, error: loadError } = await supabase
+      .from('application_test_files')
+      .select('*')
+      .eq('application_id', a.id)
+      .order('created_at')
+    if (loadError) return setError(loadError.message)
+    const files = data as ApplicationTestFile[]
+    const urls = await Promise.all(
+      files.map((f) => supabase.storage.from(TEST_FILES_BUCKET).createSignedUrl(f.storage_path, CV_URL_SECONDS)),
+    )
+    setTestFiles(files.map((f, i) => ({ ...f, url: urls[i].data?.signedUrl ?? null })))
+  }, [a.id])
+
+  useEffect(() => {
+    setTestFiles([])
+    loadTestFiles()
+  }, [loadTestFiles])
 
   useEffect(() => {
     setCvUrl(null)
@@ -196,11 +238,47 @@ export default function ApplicationDialog({
   const needs = scoresNeeded(a.stage, to)
   const currentTest = testScore(events)
   const interviews = interviewScores(events)
+  const testFileNeeded = needsTestFile(a.stage, to)
+  // Once moved on from the test, the last file stays.
+  const keepsLastFile = passedTest(events) && testFiles.length <= 1
+
+  async function attachTests(files: File[]) {
+    const problem = files.map(testFileProblem).find(Boolean)
+    if (problem) return setError(problem)
+    if (testFiles.length + files.length > MAX_TEST_FILES) {
+      return setError(`An application takes up to ${MAX_TEST_FILES} test files.`)
+    }
+    setAttaching(true)
+    setError(null)
+    for (const file of files) {
+      const attachError = await attachTestFile(a.id, file)
+      if (attachError) {
+        setError(`${file.name} couldn’t be attached: ${attachError.message}`)
+        break
+      }
+    }
+    await loadTestFiles()
+    setAttaching(false)
+  }
+
+  async function removeTest() {
+    if (!removing) return
+    setBusy(true)
+    setError(null)
+    const removeError = await removeTestFile(removing.id)
+    setBusy(false)
+    setRemoving(null)
+    if (removeError) return setError(removeError.message)
+    await loadTestFiles()
+  }
 
   async function move() {
     if (!to) return
     if (textRequired && !reason.trim()) {
       return setError(`${isReason ? 'Give a reason' : 'Add remarks'} for moving to ${STAGE_LABELS[to]}.`)
+    }
+    if (testFileNeeded && !testFiles.length) {
+      return setError(`Attach the submitted test before moving on to ${STAGE_LABELS[to]}.`)
     }
     if (needs === 'test' && score == null) return setError('Give the test a score from 1 to 5.')
     if (needs === 'interview' && ratings.some((r) => r == null)) {
@@ -432,6 +510,11 @@ export default function ApplicationDialog({
                   />
                 </>
               )}
+              {testFileNeeded && !testFiles.length && (
+                <Alert severity="warning" variant="outlined">
+                  Attach the submitted test below before moving on.
+                </Alert>
+              )}
               {needs === 'test' && (
                 <Box>
                   <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.75 }}>
@@ -514,6 +597,83 @@ export default function ApplicationDialog({
             <Alert severity="error" sx={{ mt: 2 }} onClose={() => setError(null)}>
               {error}
             </Alert>
+          )}
+
+          {(canAttachTests || testFiles.length > 0) && (
+            <Box aria-label="Test files" role="region">
+              <Divider sx={{ my: 3 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                Test files
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
+                {canAttachTests
+                  ? `The submitted test: up to ${MAX_TEST_FILES} PDFs or images, 5 MB each. Needed to move on from the test.`
+                  : 'The submitted test.'}
+              </Typography>
+              {testFiles.length > 0 ? (
+                <Stack component="ul" spacing={0.5} sx={{ listStyle: 'none', p: 0, m: 0 }}>
+                  {testFiles.map((f) => (
+                    <Stack component="li" key={f.id} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                        {f.url ? (
+                          <MuiLink href={f.url} target="_blank" rel="noopener" variant="body2" noWrap sx={{ display: 'block' }}>
+                            {f.file_name}
+                          </MuiLink>
+                        ) : (
+                          <Typography variant="body2" noWrap>
+                            {f.file_name}
+                          </Typography>
+                        )}
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          {nameOf(f.uploaded_by)} · {formatDayTime(f.created_at)}
+                        </Typography>
+                      </Box>
+                      {canAttachTests && (
+                        <IconButton
+                          size="small"
+                          aria-label={`Remove ${f.file_name}`}
+                          disabled={keepsLastFile || busy || attaching}
+                          title={keepsLastFile ? 'The application has moved on from the test, so it keeps this file.' : undefined}
+                          onClick={() => setRemoving(f)}
+                        >
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  None attached yet.
+                </Typography>
+              )}
+              {canAttachTests && testFiles.length < MAX_TEST_FILES && (
+                <>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<AttachFileIcon />}
+                    loading={attaching}
+                    onClick={() => testInput.current?.click()}
+                    sx={{ mt: 1.5 }}
+                  >
+                    Attach test
+                  </Button>
+                  <input
+                    ref={testInput}
+                    type="file"
+                    hidden
+                    multiple
+                    accept={TEST_FILE_ACCEPT}
+                    aria-label="Test file"
+                    onChange={(e) => {
+                      attachTests([...(e.target.files ?? [])])
+                      e.target.value = ''
+                    }}
+                  />
+                </>
+              )}
+            </Box>
           )}
 
           {(currentTest != null || interviews.interviews > 0) && (
@@ -698,6 +858,17 @@ export default function ApplicationDialog({
           </Stack>
         </Box>
       </Stack>
+
+      <ConfirmDialog
+        open={!!removing}
+        title="Remove test file?"
+        message={`${removing?.file_name ?? 'The file'} will be deleted.`}
+        confirmLabel="Remove"
+        destructive
+        busy={busy}
+        onConfirm={removeTest}
+        onClose={() => setRemoving(null)}
+      />
 
       <FormDialog
         open={undoing}

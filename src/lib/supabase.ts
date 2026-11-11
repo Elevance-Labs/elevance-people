@@ -14,6 +14,8 @@ export const supabase = createClient(url, anonKey, {
 
 export const DOCS_BUCKET = 'employee-docs'
 export const APPLICATIONS_BUCKET = 'job-applications'
+// Private: submitted tests on applications, at <application_id>/<uuid>.<ext>.
+export const TEST_FILES_BUCKET = 'application-tests'
 // Public: the logo is shown on the public job page.
 export const BRANDING_BUCKET = 'branding'
 // Private: equipment invoices and photos, for whoever manages equipment.

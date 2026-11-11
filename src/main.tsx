@@ -7,6 +7,7 @@ import '@fontsource/roboto/latin-500.css'
 import '@fontsource/roboto/latin-700.css'
 import App from './App'
 import { AuthProvider } from './auth/AuthProvider'
+import UpdatePrompt from './components/UpdatePrompt'
 import { theme } from './theme'
 
 // GitHub Pages can't send X-Frame-Options or frame-ancestors, so the app
@@ -19,6 +20,7 @@ if (window.top !== window.self) {
     <StrictMode>
       <ThemeProvider theme={theme}>
         <CssBaseline />
+        <UpdatePrompt />
         <AuthProvider>
           <HashRouter>
             <App />

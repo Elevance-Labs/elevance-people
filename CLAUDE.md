@@ -58,7 +58,9 @@ behaviour).
   salary and notes by `application_set_hr_details`); their stage
   moves only through `application_move` / `application_undo`, and to hired
   only through `application_hire`; the test score and interview ratings
-  are given only with `application_move`. Onboardings change only through
+  are given only with `application_move`. Test files are attached and
+  removed only through `application_add_test_file` / `_remove_test_file`.
+  Onboardings change only through
   `onboarding_task_set` / `_complete` / `_cancel`, and the checklist sync
   (`onboarding_sync` / `offboarding_sync`, run by triggers on checklist and
   department changes, in progress only); checklist order only
@@ -99,6 +101,18 @@ behaviour).
 - **Stored HTML is untrusted.** Job descriptions and announcements are
   sanitised on save and again on render (`lib/richText.ts`); never render one
   any other way.
+- **One of three apps.** `lib/suite.ts` lists the suite (Work, Support,
+  People), where each lives (the sibling folder, or `VITE_SUITE_*_URL`) and the
+  `?sso=<company email>` hand-over; `components/AppSwitcher` is the grid icon
+  before the logo. `AuthProvider` takes the hint once at load, strips it from
+  the address and, with no session, goes to Google with `login_hint` and no
+  chooser. The hint is never trusted: binding decides who gets in.
+- **Installable (PWA).** `vite.pwa.ts` (build plugin, no dependency) emits
+  `manifest.webmanifest` and `sw.js`; `src/pwa.ts` registers it and
+  `components/UpdatePrompt` offers a waiting build. The worker caches the
+  app's own files only, **never a Supabase response**, and stays inside its
+  own folder (sibling apps share the origin). Not registered on the public
+  job page (`#/careers`). Icons in `public/icons/`.
 - **The built page locks itself down.** A Content Security Policy is added at
   build time (`vite.config.ts`) and the app refuses to run framed
   (`main.tsx`). A new external host (API, iframe, image, font) is added to
@@ -267,7 +281,8 @@ behaviour).
 - `hiring.ts` — job select (named FKs), public job URL, logo URL, job and
   application error messages; application stages: transitions, reason and
   hiring-team rules (mirrors of the SQL), board columns, hire error messages;
-  default interview questions, which moves need scores, the score maths.
+  default interview questions, which moves need scores, the score maths;
+  test files: limits, when one is needed or kept, attach / remove.
 - `onboarding.ts` — onboarding selects (named employee FK), progress, overdue,
   grouping tasks by section (also offboarding's), who may tick a task (mirror
   of `can_tick_checklist_task`, both kinds), reorder helper, error messages.
@@ -410,6 +425,13 @@ Full detail in `supabase/schema.sql`.
   only lets anyone upload while that job takes applications, and reads follow
   who can see the application. A job with
   applications can't be deleted.
+- `application_test_files` — the submitted test (1–3 files, needed by
+  `application_move` to go on from the test except to rejected / abandoned),
+  in the private `application-tests` bucket at `<application_id>/…`.
+  Attached and removed by HR or the job's hiring manager while they see the
+  application (`can_attach_test_files`), at any stage; the last one stays once
+  moved on from the test (`application_passed_test`). Read by whoever sees
+  the application.
 - `onboarding_template_sections` → `onboarding_template_tasks` — the
   checklist. A section may name a department (null = everyone; names unique
   per department); a person gets everyone's and their department's. HR reads, company admins write; `sort_order` set by trigger (last)
