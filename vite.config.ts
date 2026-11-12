@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => ({
       name: 'Elevance People',
       shortName: 'People',
       description: 'The Elevance Labs employee portal',
-      themeColor: '#3f51b5',
+      themeColor: '#00796b',
       backgroundColor: '#f6f7fb',
     }),
   ],
