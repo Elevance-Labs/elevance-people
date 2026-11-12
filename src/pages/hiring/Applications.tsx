@@ -177,7 +177,7 @@ export default function Applications() {
                   sx={{
                     width: COLUMN_WIDTH,
                     flexShrink: 0,
-                    bgcolor: 'grey.50',
+                    bgcolor: 'background.subtle',
                     p: 1,
                     display: 'flex',
                     flexDirection: 'column',

@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import { Box, ButtonBase, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
+import { readableInk } from '../theme'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import Diversity3OutlinedIcon from '@mui/icons-material/Diversity3Outlined'
 import ReplayIcon from '@mui/icons-material/Replay'
@@ -114,7 +115,7 @@ function ValueCard({ value, index }: { value: Value; index: number }) {
             minHeight: 168,
             border: 1,
             borderColor: alpha(accent, 0.22),
-            background: `linear-gradient(140deg, ${alpha(accent, 0.16)} 0%, ${alpha(accent, 0.04)} 70%, #fff 100%)`,
+            background: (t) => `linear-gradient(140deg, ${alpha(accent, 0.16)} 0%, ${alpha(accent, 0.04)} 70%, ${t.palette.background.paper} 100%)`,
           }}
         >
           <Typography
@@ -140,8 +141,8 @@ function ValueCard({ value, index }: { value: Value; index: number }) {
               borderRadius: 2.5,
               display: 'grid',
               placeItems: 'center',
-              bgcolor: '#fff',
-              color: ink,
+              bgcolor: 'background.paper',
+              color: readableInk(ink),
               boxShadow: `0 6px 16px ${alpha(accent, 0.25)}`,
               '& svg': { fontSize: 26 },
             }}
@@ -154,7 +155,7 @@ function ValueCard({ value, index }: { value: Value; index: number }) {
           </Typography>
           <Typography
             variant="caption"
-            sx={{ color: ink, fontWeight: 600, mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}
+            sx={{ color: readableInk(ink), fontWeight: 600, mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}
           >
             Read more <ArrowForwardIcon sx={{ fontSize: 14 }} />
           </Typography>
@@ -168,11 +169,11 @@ function ValueCard({ value, index }: { value: Value; index: number }) {
             transform: 'rotateY(180deg)',
             border: 1,
             borderColor: alpha(accent, 0.35),
-            bgcolor: '#fff',
+            bgcolor: 'background.paper',
             backgroundImage: `linear-gradient(160deg, ${alpha(accent, 0.1)}, ${alpha(accent, 0.02)})`,
           }}
         >
-          <Typography variant="subtitle2" component="p" sx={{ color: ink, fontWeight: 700, mb: 1 }}>
+          <Typography variant="subtitle2" component="p" sx={{ color: readableInk(ink), fontWeight: 700, mb: 1 }}>
             {value.title}
           </Typography>
           <Typography variant="body2" sx={{ color: 'text.primary', lineHeight: 1.6, flexGrow: 1 }}>

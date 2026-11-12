@@ -68,7 +68,7 @@ export function PrivateNotes({ employeeId, name }: { employeeId: string; name: s
       variant="outlined"
       component="section"
       aria-label="Private notes"
-      sx={{ p: { xs: 2, sm: 3 }, bgcolor: 'grey.50', borderStyle: 'dashed' }}
+      sx={{ p: { xs: 2, sm: 3 }, bgcolor: 'background.subtle', borderStyle: 'dashed' }}
     >
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
         <LockOutlinedIcon fontSize="small" sx={{ color: 'text.secondary' }} />

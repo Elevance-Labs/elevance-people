@@ -107,6 +107,14 @@ behaviour).
   foot, via `components/useNavCollapsed`, one localStorage key shared by the
   apps; the first load is the app's icon over a running bar, `Splash` in `components/common`)
   match Work, Support and People. A change to either belongs in all three.
+- **Light, dark or system.** `theme.ts` has both colour schemes (no CSS
+  variables, so `theme.palette` is the mode in use); `ThemeProvider` takes
+  `themeSettings` (one localStorage key, `elevance.theme`, shared by the
+  apps); `components/ThemeModeSwitch` is its control in the account menu.
+  Colours come from the palette (`background.subtle` / `muted` for tints,
+  `divider`, `text.*`); a fixed hex is for brand or data only, and accent text
+  on the handbook pages goes through `readableInk`. The public job page stays
+  light (`brandedTheme`).
 - **One of three apps.** `lib/suite.ts` lists the suite (Work, Support,
   People), where each lives (the sibling folder, or `VITE_SUITE_*_URL`) and the
   `?sso=<company email>` hand-over; `components/AppSwitcher` is the grid icon
@@ -145,8 +153,8 @@ behaviour).
 | `src/pages/performance/` | Performance: the tabbed page (Me, My team, People), one review, one person's history. |
 | `src/pages/configuration/` | Configuration pages: the onboarding and offboarding checklists (one page, by kind; company admins); vendors (HR, finance admins, company admins); guides (company admins). |
 | `src/pages/public/` | Pages served without sign-in (the public job page). |
-| `src/components/` | Shared UI: app shell, documents panel, rich text, small common pieces. |
-| `src/theme.ts` | MUI theme, and the branded variant the public page uses. |
+| `src/components/` | Shared UI: app shell (with `ThemeModeSwitch`, light / dark / system), documents panel, rich text, small common pieces. |
+| `src/theme.ts` | MUI theme (light and dark), its provider settings, `readableInk`, and the branded (always light) variant the public page uses. |
 | `src/auth/` | `AuthProvider` — session, employee binding, role flags. |
 | `src/lib/` | Supabase client, domain types, constants/formatters, company-config helpers. |
 | `supabase/migrations/` | Ordered, timestamped changes, applied by `supabase db push`. |

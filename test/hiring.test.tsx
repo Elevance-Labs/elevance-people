@@ -165,7 +165,13 @@ check('if the database says it has applications, that is explained',
 // ============================== the public job page ==============================
 reset()
 table('job_openings')[0].description = '<h2>Role</h2><p>Hi</p><script>window.hacked = 1</script><img src=x onerror="alert(1)">'
+// The careers page wears the company's brand, always light, even for
+// someone who chose the dark theme in this browser.
+window.localStorage.setItem('elevance.theme', 'dark')
 await mountApp('/careers/j-open')
+check('the public page stays light under a dark choice',
+  window.getComputedStyle(document.body).backgroundColor === 'rgb(246, 247, 251)', window.getComputedStyle(document.body).backgroundColor)
+window.localStorage.removeItem('elevance.theme')
 check('the job shows with its department, designation and due date',
   text().includes('Frontend Engineer') && text().includes('Software Engineer · Engineering') &&
   text().includes('Apply by'), text().slice(0, 300))

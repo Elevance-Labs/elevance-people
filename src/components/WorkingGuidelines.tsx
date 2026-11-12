@@ -1,6 +1,7 @@
 import { useState, type ReactElement, type ReactNode } from 'react'
 import { Box, Chip, Paper, Stack, Tab, Tabs, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
+import { readableInk } from '../theme'
 import CalendarMonthOutlinedIcon from '@mui/icons-material/CalendarMonthOutlined'
 import CancelRoundedIcon from '@mui/icons-material/CancelRounded'
 import ChatOutlinedIcon from '@mui/icons-material/ChatOutlined'
@@ -69,7 +70,7 @@ const CATEGORIES: Category[] = [
         extra: (
           <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
             {STATUSES.map((s) => (
-              <Chip key={s} label={s} size="small" variant="outlined" sx={{ bgcolor: '#fff' }} />
+              <Chip key={s} label={s} size="small" variant="outlined" sx={{ bgcolor: 'background.paper' }} />
             ))}
           </Stack>
         ),
@@ -177,7 +178,7 @@ const CATEGORIES: Category[] = [
                   sx={{
                     fontWeight: 600,
                     bgcolor: i === JIRA_FLOW.length - 1 ? alpha(GOOD, 0.12) : alpha('#8e6cd8', 0.12),
-                    color: i === JIRA_FLOW.length - 1 ? GOOD : '#5e35b1',
+                    color: readableInk(i === JIRA_FLOW.length - 1 ? GOOD : '#5e35b1'),
                   }}
                 />
               </Stack>
@@ -201,7 +202,7 @@ const CATEGORIES: Category[] = [
 
 // A tick or a cross with its text, for golden rules and examples alike.
 function Mark({ good, label, children }: { good: boolean; label: string; children: ReactNode }) {
-  const color = good ? GOOD : BAD
+  const color = readableInk(good ? GOOD : BAD)
   const Icon = good ? CheckCircleRoundedIcon : CancelRoundedIcon
   return (
     <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
@@ -231,7 +232,7 @@ function PracticeCard({ practice, index, category }: { practice: Practice; index
             placeItems: 'center',
             fontSize: 13,
             fontWeight: 700,
-            color: category.ink,
+            color: readableInk(category.ink),
             bgcolor: alpha(category.accent, 0.14),
           }}
         >
@@ -278,9 +279,9 @@ function RuleOfThumb({ category }: { category: Category }) {
         background: `linear-gradient(120deg, ${alpha(category.accent, 0.14)}, ${alpha(category.accent, 0.03)})`,
       }}
     >
-      <LightbulbOutlinedIcon aria-hidden sx={{ color: category.ink, mt: '2px' }} />
+      <LightbulbOutlinedIcon aria-hidden sx={{ color: readableInk(category.ink), mt: '2px' }} />
       <Box>
-        <Typography variant="overline" sx={{ color: category.ink, fontWeight: 700, lineHeight: 1.6 }}>
+        <Typography variant="overline" sx={{ color: readableInk(category.ink), fontWeight: 700, lineHeight: 1.6 }}>
           Rule of thumb
         </Typography>
         <Typography variant="subtitle2" component="p" sx={{ fontWeight: 700 }}>
@@ -313,7 +314,7 @@ export function WorkingGuidelines() {
           position: 'relative',
           overflow: 'hidden',
           background: (t) =>
-            `linear-gradient(135deg, ${alpha(t.palette.primary.main, 0.12)} 0%, ${alpha('#14a3a3', 0.08)} 55%, #fff 100%)`,
+            `linear-gradient(135deg, ${alpha(t.palette.primary.main, 0.12)} 0%, ${alpha('#14a3a3', 0.08)} 55%, ${t.palette.background.paper} 100%)`,
         }}
       >
         <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-start' }}>
@@ -326,7 +327,7 @@ export function WorkingGuidelines() {
               borderRadius: 2.5,
               display: { xs: 'none', sm: 'grid' },
               placeItems: 'center',
-              bgcolor: '#fff',
+              bgcolor: 'background.paper',
               color: 'primary.main',
               boxShadow: (t) => `0 6px 16px ${alpha(t.palette.primary.main, 0.2)}`,
             }}
@@ -342,7 +343,7 @@ export function WorkingGuidelines() {
             </Typography>
             <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
               {['🧠 Focus', '🔍 Transparency', '⏳ Async clarity'].map((p) => (
-                <Chip key={p} label={p} size="small" sx={{ bgcolor: '#fff', fontWeight: 600 }} />
+                <Chip key={p} label={p} size="small" sx={{ bgcolor: 'background.paper', fontWeight: 600 }} />
               ))}
             </Stack>
           </Box>
@@ -361,7 +362,7 @@ export function WorkingGuidelines() {
             mb: 2,
             borderBottom: 1,
             borderColor: 'divider',
-            '& .MuiTabs-indicator': { bgcolor: category.ink, height: 3 },
+            '& .MuiTabs-indicator': { bgcolor: readableInk(category.ink), height: 3 },
           }}
         >
           {CATEGORIES.map((c) => (
@@ -373,7 +374,7 @@ export function WorkingGuidelines() {
               iconPosition="start"
               id={`norms-tab-${c.id}`}
               aria-controls="norms-panel"
-              sx={{ minHeight: 48, '&.Mui-selected': { color: c.ink } }}
+              sx={{ minHeight: 48, '&.Mui-selected': { color: readableInk(c.ink) } }}
             />
           ))}
         </Tabs>

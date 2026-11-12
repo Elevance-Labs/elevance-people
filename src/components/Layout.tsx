@@ -65,6 +65,7 @@ import AppSwitcher from './AppSwitcher'
 import { useNavCollapsed } from './useNavCollapsed'
 import { FormDialog, Logo, PersonAvatar } from './common'
 import { InstallBanner, InstallNavButton } from './InstallApp'
+import ThemeModeSwitch from './ThemeModeSwitch'
 
 const DRAWER_WIDTH = 248
 // Collapsed, the navigation is a rail just wide enough for its icons.
@@ -365,6 +366,8 @@ export default function Layout() {
                 {designation ?? APP_ROLE_LABELS[employee.app_role]}
               </Typography>
             </Box>
+            <Divider />
+            <ThemeModeSwitch />
             <Divider />
             {employee.login_method === 'password' && (
               <MenuItem

@@ -410,7 +410,7 @@ export default function ApplicationDialog({
             flexGrow: 1,
             minWidth: 0,
             minHeight: { xs: '70vh', md: 0 },
-            bgcolor: 'grey.100',
+            bgcolor: 'background.muted',
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -840,7 +840,7 @@ export default function ApplicationDialog({
                 {e.reason && (
                   <Typography
                     variant="body2"
-                    sx={{ mt: 0.75, p: 1, bgcolor: 'grey.50', borderRadius: 1, whiteSpace: 'pre-wrap' }}
+                    sx={{ mt: 0.75, p: 1, bgcolor: 'background.subtle', borderRadius: 1, whiteSpace: 'pre-wrap' }}
                   >
                     {e.reason}
                   </Typography>

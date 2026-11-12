@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactElement } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Alert, Box, ButtonBase, Chip, LinearProgress, Paper, Stack, Tab, Tabs, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
+import { readableInk } from '../../theme'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import HandshakeOutlinedIcon from '@mui/icons-material/HandshakeOutlined'
@@ -39,8 +40,8 @@ function GuideCard({ guide }: { guide: Guide }) {
             borderRadius: 2,
             display: 'grid',
             placeItems: 'center',
-            color: ready ? ink : 'text.disabled',
-            bgcolor: ready ? alpha(accent, 0.12) : 'grey.100',
+            color: ready ? readableInk(ink) : 'text.disabled',
+            bgcolor: ready ? alpha(accent, 0.12) : 'background.muted',
           }}
         >
           <DescriptionOutlinedIcon fontSize="small" />
@@ -54,7 +55,7 @@ function GuideCard({ guide }: { guide: Guide }) {
         {guide.description}
       </Typography>
       {ready && (
-        <Typography variant="caption" sx={{ color: ink, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Typography variant="caption" sx={{ color: readableInk(ink), fontWeight: 600, display: 'flex', alignItems: 'center', gap: 0.5 }}>
           Read the guide <ArrowForwardIcon sx={{ fontSize: 14 }} />
         </Typography>
       )}
@@ -96,7 +97,7 @@ function FunctionGuides({ fn, mine, guides }: { fn: BusinessFunction; mine: bool
           display: 'flex',
           gap: 2,
           alignItems: 'flex-start',
-          background: `linear-gradient(135deg, ${alpha(accent, 0.14)} 0%, ${alpha(accent, 0.03)} 70%, #fff 100%)`,
+          background: (t) => `linear-gradient(135deg, ${alpha(accent, 0.14)} 0%, ${alpha(accent, 0.03)} 70%, ${t.palette.background.paper} 100%)`,
         }}
       >
         <Box
@@ -108,8 +109,8 @@ function FunctionGuides({ fn, mine, guides }: { fn: BusinessFunction; mine: bool
             borderRadius: 2.5,
             display: { xs: 'none', sm: 'grid' },
             placeItems: 'center',
-            bgcolor: '#fff',
-            color: ink,
+            bgcolor: 'background.paper',
+            color: readableInk(ink),
             boxShadow: `0 6px 16px ${alpha(accent, 0.25)}`,
           }}
         >

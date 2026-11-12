@@ -66,7 +66,8 @@ export default function JobPosting() {
 
   return (
     <ThemeProvider theme={theme}>
-      <CssBaseline />
+      {/* Always light: the company's branded page sets its own scheme. */}
+      <CssBaseline enableColorScheme />
       <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
         <Box component="header" sx={{ bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
           <Container maxWidth="lg" sx={{ py: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>

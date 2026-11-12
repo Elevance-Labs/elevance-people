@@ -316,7 +316,7 @@ export default function Checklist({ kind }: { kind: 'onboarding' | 'offboarding'
               <Stack
                 direction="row"
                 spacing={1}
-                sx={{ alignItems: 'center', px: 2, py: 1.25, bgcolor: 'grey.50', borderBottom: 1, borderColor: 'divider' }}
+                sx={{ alignItems: 'center', px: 2, py: 1.25, bgcolor: 'background.subtle', borderBottom: 1, borderColor: 'divider' }}
               >
                 <DragHandle
                   label={section.name}

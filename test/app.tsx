@@ -11,7 +11,7 @@ import {
 import { CssBaseline, ThemeProvider } from '@mui/material'
 import App from '../src/App'
 import { AuthProvider } from '../src/auth/AuthProvider'
-import { theme } from '../src/theme'
+import { theme, themeSettings } from '../src/theme'
 import { settle, trackNavigation } from './setup'
 
 let root: Root | null = null
@@ -42,8 +42,8 @@ export async function mountApp(path = '/') {
   trackNavigation(() => history.location.pathname + history.location.search !== committed)
   root = createRoot(document.getElementById('root')!)
   root.render(
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
+    <ThemeProvider theme={theme} {...themeSettings}>
+      <CssBaseline enableColorScheme />
       <AuthProvider>
         <HistoryRouter history={history}>
           <LocationProbe />
