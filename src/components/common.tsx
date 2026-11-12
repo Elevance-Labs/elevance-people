@@ -12,6 +12,7 @@ import {
   DialogContentText,
   DialogTitle,
   IconButton,
+  LinearProgress,
   Stack,
   Typography,
   type ChipProps,
@@ -28,6 +29,18 @@ export function Logo({ size = 32 }: { size?: number }) {
     <Avatar variant="rounded" sx={{ width: size, height: size, bgcolor: 'primary.main' }}>
       <PeopleIcon sx={{ fontSize: size * 0.62 }} />
     </Avatar>
+  )
+}
+
+/** The first load: the app's icon, centred, with a bar running beneath it. */
+export function Splash() {
+  return (
+    <Box sx={{ display: 'grid', placeItems: 'center', minHeight: '100vh', bgcolor: 'background.default' }}>
+      <Stack spacing={3} sx={{ alignItems: 'center' }}>
+        <Logo size={72} />
+        <LinearProgress aria-label="Loading" sx={{ width: 160, borderRadius: 1 }} />
+      </Stack>
+    </Box>
   )
 }
 

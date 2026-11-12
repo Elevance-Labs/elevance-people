@@ -105,7 +105,8 @@ behaviour).
   the layout (header: switcher, logo, account button with name and role;
   tinted current page; navigation that folds to a rail from **Collapse** at its
   foot, via `components/useNavCollapsed`, one localStorage key shared by the
-  apps) match Work, Support and People. A change to either belongs in all three.
+  apps; the first load is the app's icon over a running bar, `Splash` in `components/common`)
+  match Work, Support and People. A change to either belongs in all three.
 - **One of three apps.** `lib/suite.ts` lists the suite (Work, Support,
   People), where each lives (the sibling folder, or `VITE_SUITE_*_URL`) and the
   `?sso=<company email>` hand-over; `components/AppSwitcher` is the grid icon

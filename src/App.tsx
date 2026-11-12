@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { Box, CircularProgress } from '@mui/material'
 import { useAuth } from './auth/AuthProvider'
 import Layout from './components/Layout'
+import { Splash } from './components/common'
 import Login from './pages/Login'
 import Employees from './pages/Employees'
 import Appraisals from './pages/Appraisals'
@@ -49,6 +50,7 @@ import ManagerFeedbackForm from './pages/performance/ManagerFeedbackForm'
 const JobOpeningForm = lazy(() => import('./pages/hiring/JobOpeningForm'))
 const Announcements = lazy(() => import('./pages/company/Announcements'))
 
+// A lazy page's own load, inside the shell (the first load shows the Splash).
 const spinner = (
   <Box sx={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}>
     <CircularProgress />
@@ -78,7 +80,7 @@ function SignedIn() {
     canClaimReimbursements,
   } = useAuth()
 
-  if (loading) return spinner
+  if (loading) return <Splash />
   if (!employee) return <Login />
 
   return (
