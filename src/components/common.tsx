@@ -26,7 +26,7 @@ import { usePhone } from './usePhone'
 
 export function Logo({ size = 32 }: { size?: number }) {
   return (
-    <Avatar variant="rounded" sx={{ width: size, height: size, bgcolor: 'primary.main' }}>
+    <Avatar variant="rounded" sx={{ width: size, height: size, bgcolor: '#00796b' }}>
       <PeopleIcon sx={{ fontSize: size * 0.62 }} />
     </Avatar>
   )
