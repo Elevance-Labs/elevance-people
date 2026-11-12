@@ -18,7 +18,7 @@ import {
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import CloseIcon from '@mui/icons-material/Close'
-import GroupsIcon from '@mui/icons-material/Groups'
+import { PeopleIcon } from './ElevanceIcons'
 import { JOB_STATUS_COLORS, JOB_STATUS_LABELS, STATUS_COLORS, STATUS_LABELS } from '../lib/constants'
 import type { EmployeeStatus, JobOpeningStatus } from '../lib/types'
 import { usePhone } from './usePhone'
@@ -26,7 +26,7 @@ import { usePhone } from './usePhone'
 export function Logo({ size = 32 }: { size?: number }) {
   return (
     <Avatar variant="rounded" sx={{ width: size, height: size, bgcolor: 'primary.main' }}>
-      <GroupsIcon sx={{ fontSize: size * 0.62 }} />
+      <PeopleIcon sx={{ fontSize: size * 0.62 }} />
     </Avatar>
   )
 }
