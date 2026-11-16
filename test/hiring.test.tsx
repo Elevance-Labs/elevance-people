@@ -297,6 +297,87 @@ for (const id of ['j-draft', 'nope']) {
     text().includes('This job isn’t open') && !text().includes('HR Intern'), text().slice(0, 200))
 }
 
+// ============================== the public list of jobs ==============================
+const menuItem = (name: string) =>
+  [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((m) => m.textContent?.includes(name))
+const snackbar = () => document.querySelector('.MuiSnackbarContent-message')?.textContent ?? ''
+
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/jobs')
+await click(button('Careers page'))
+check('HR is offered the careers page link with and without branding, and to open it',
+  !!menuItem('Copy link') && !!menuItem('Copy link without branding') &&
+  menuItem('Open careers page')?.getAttribute('href') === 'http://localhost/#/careers')
+// jsdom has no clipboard, so the link is shown to copy by hand.
+await click(menuItem('Copy link')!)
+check('the careers link is the hash route of this app', await waitFor(() => snackbar() === 'http://localhost/#/careers'), snackbar())
+await click(button('Careers page'))
+await click(menuItem('Copy link without branding')!)
+check('…and without branding it asks for no top bar',
+  await waitFor(() => snackbar() === 'http://localhost/#/careers?branding=off'), snackbar())
+
+reset()
+table('job_openings')[0].description = '<p>Build <strong>great</strong> things.</p><script>window.hacked = 1</script>'
+await mountApp('/careers')
+const cardLink = (title: string) =>
+  [...document.querySelectorAll<HTMLAnchorElement>('a')].find((a) => a.textContent?.includes(title))
+check('signed out, the careers page lists the open job as a card, not the draft',
+  !!cardLink('Frontend Engineer') && !text().includes('HR Intern') && !text().includes('Sign in with Google'),
+  text().slice(0, 300))
+check('…with its designation, department, due date and a text excerpt of the description',
+  cardLink('Frontend Engineer')?.textContent?.includes('Software Engineer · Engineering') &&
+  cardLink('Frontend Engineer')?.textContent?.includes('Apply by') &&
+  cardLink('Frontend Engineer')?.textContent?.includes('Build great things.') &&
+  !text().includes('window.hacked') && !document.querySelector('script'),
+  cardLink('Frontend Engineer')?.textContent)
+check('the card leads to the job’s page', cardLink('Frontend Engineer')?.getAttribute('href') === '/careers/j-open',
+  cardLink('Frontend Engineer')?.getAttribute('href'))
+check('it reads only through the public functions',
+  captured.reads.length === 0 && captured.rpcs.map((r) => r.name).sort().join() === 'job_postings,public_branding',
+  `${captured.reads.join()} | ${captured.rpcs.map((r) => r.name).join()}`)
+check('by default it wears the top bar with the logo, and the perks',
+  !!document.querySelector('header img[src="https://public.example/branding/logo-old.png"]') &&
+  text().includes('Health insurance'))
+const listBand = document.querySelector('h1')?.parentElement?.parentElement
+check('…in the branded primary colour',
+  listBand && getComputedStyle(listBand).backgroundColor === 'rgb(10, 125, 90)',
+  listBand && getComputedStyle(listBand).backgroundColor)
+
+reset()
+await mountApp('/careers?branding=off')
+check('with branding off there is no top bar, but the colour and perks stay',
+  !document.querySelector('header') && text().includes('Health insurance') &&
+  getComputedStyle(document.querySelector('h1')!.parentElement!.parentElement!).backgroundColor === 'rgb(10, 125, 90)')
+check('…and the card keeps it off on the job’s page',
+  cardLink('Frontend Engineer')?.getAttribute('href') === '/careers/j-open?branding=off',
+  cardLink('Frontend Engineer')?.getAttribute('href'))
+
+reset()
+await mountApp('/careers/j-open?branding=off')
+check('the job page honours branding off too, and links back to the list with it',
+  !document.querySelector('header') && text().includes('Apply for this job') &&
+  cardLink('All open positions')?.getAttribute('href') === '/careers?branding=off')
+
+reset()
+await mountApp('/careers/j-open')
+check('the job page links back to all open positions',
+  !!document.querySelector('header') && cardLink('All open positions')?.getAttribute('href') === '/careers')
+
+reset()
+table('job_openings')[0].due_date = '2026-06-01'
+table('job_openings')[1].status = 'open'
+await mountApp('/careers')
+check('a job past its due date isn’t listed; one with no due date is open until filled',
+  !text().includes('Frontend Engineer') && cardLink('HR Intern')?.textContent?.includes('Open until filled'),
+  text().slice(0, 300))
+
+reset()
+table('job_openings')[0].status = 'on_hold'
+await mountApp('/careers')
+check('with nothing open, the page says so',
+  text().includes('No roles are taking applications right now') && !cardLink('Frontend Engineer'))
+
 // ============================== branding (company admins) ==============================
 reset()
 signInAs(PEOPLE.companyAdmin)

@@ -21,6 +21,7 @@ import Branding from './pages/company/Branding'
 import JobOpenings from './pages/hiring/JobOpenings'
 import Applications from './pages/hiring/Applications'
 import JobPosting from './pages/public/JobPosting'
+import JobPostings from './pages/public/JobPostings'
 import Onboarding from './pages/hr/Onboarding'
 import OnboardingDetail from './pages/hr/OnboardingDetail'
 import Offboarding from './pages/hr/Offboarding'
@@ -61,6 +62,7 @@ export default function App() {
   return (
     <Routes>
       {/* Public: no sign-in needed. Everything else sits behind the employee login. */}
+      <Route path="/careers" element={<JobPostings />} />
       <Route path="/careers/:id" element={<JobPosting />} />
       <Route path="*" element={<SignedIn />} />
     </Routes>

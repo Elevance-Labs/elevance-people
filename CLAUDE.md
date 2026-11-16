@@ -39,7 +39,7 @@ behaviour).
   until the SQL agrees.
 - **The anon key is public.** Nothing private may be reachable by `anon`; every
   table revokes it. The only ways in for `anon` are the public job functions
-  (`job_posting`, `public_branding`, `submit_application`) and adding a PDF to
+  (`job_postings`, `job_posting`, `public_branding`, `submit_application`) and adding a PDF to
   an open job's CV folder; keep them that narrow. Employee data is sensitive (CNIC, bank, IBAN, DOB) — only
   HR sees full records; everyone else goes through `employee_directory`.
 - **Login is bound by company email and sign-in method.** An auth user is
@@ -154,7 +154,7 @@ behaviour).
 | `src/pages/operations/` | Operations pages (HR, finance admins, company admins): equipment list and one item. |
 | `src/pages/performance/` | Performance: the tabbed page (Me, My team, People), one review, one person's history. |
 | `src/pages/configuration/` | Configuration pages: the onboarding and offboarding checklists (one page, by kind; company admins); vendors (HR, finance admins, company admins); guides (company admins). |
-| `src/pages/public/` | Pages served without sign-in (the public job page). |
+| `src/pages/public/` | Pages served without sign-in (the careers list and the public job page). |
 | `src/components/` | Shared UI: app shell (with `ThemeModeSwitch`, light / dark / system), documents panel, rich text, small common pieces. |
 | `src/theme.ts` | MUI theme (light and dark), its provider settings, `readableInk`, and the branded (always light) variant the public page uses. |
 | `src/auth/` | `AuthProvider` — session, employee binding, role flags. |
@@ -168,8 +168,11 @@ behaviour).
 
 ## 4. Routes and pages
 
-- `/careers/:id` — **public**, matched in `src/App.tsx` before the sign-in
-  gate: an open job, the application form and branding. Uses no session.
+- `/careers` and `/careers/:id` — **public**, matched in `src/App.tsx` before
+  the sign-in gate: the open jobs taking applications as cards, and one open
+  job with the application form; both branded (`?branding=off` drops the top
+  bar only, kept on links between them). Use no session.
+- `/jobs` offers the careers page link (with and without branding).
 - Otherwise no session → `Login` (Google; email and password, with a reset
   link, for password logins); no other routes exist until signed in.
 - `/dashboard` — everyone; the landing page. Performance reminders (reviews
@@ -300,7 +303,8 @@ behaviour).
 - `leaves.ts` — leave select with its type, client mirror of the working-day
   count (weekends and holidays out), holiday columns and helpers, year
   helpers, balance maths, leave and holiday error messages.
-- `hiring.ts` — job select (named FKs), public job URL, logo URL, job and
+- `hiring.ts` — job select (named FKs), public careers and job URLs (and
+  the `branding` param), logo URL, job and
   application error messages; application stages: transitions, reason and
   hiring-team rules (mirrors of the SQL), board columns, hire error messages;
   default interview questions, which moves need scores, the score maths;
@@ -341,8 +345,8 @@ behaviour).
 - `guides.ts` — guide select, function summaries, turning a Google
   Docs / Sheets / Slides link into its embeddable address, the link check,
   a new guide's slug, error messages.
-- `richText.ts` — DOMPurify allow-list sanitiser and styles shared by the
-  editor and the view.
+- `richText.ts` — DOMPurify allow-list sanitiser, plain-text excerpt, and
+  styles shared by the editor and the view.
 - `company.tsx` — helpers for the config pages: embedded-count reading, the
   designation-with-department select (names the FK explicitly), sorting, the
   designation picker's options, and mapping Postgres error codes to messages.
@@ -368,6 +372,9 @@ behaviour).
   due date, their review's state, their feedback on the manager), and HR's
   tab: who owes feedback for a month, averages per manager with names, the
   questions.
+- `components/Careers.tsx` — the public careers pages' frame (branded theme,
+  top bar unless `?branding=off`) and perks; their hooks (branding, the
+  param, page title) in `components/useCareers.ts`.
 - `components/Reimbursements.tsx` — claim status chip, and the claim dialog
   (details, receipts, history, and the viewer's actions: withdraw, approve,
   reject, process, disburse); shared by both reimbursement pages.
@@ -431,7 +438,7 @@ Full detail in `supabase/schema.sql`.
 - `job_openings` (+ `job_opening_interviewers`, `manager_id`) — HR manages;
   the job's hiring team (manager, interviewers; `is_hiring_team`) reads it. Department and designation required, kept consistent by the same
   composite FK as employees. Public only while `open`; takes applications
-  until `due_date`. `created_by` stamped by trigger. Its interview
+  until `due_date`, and only then listed (`job_postings`). `created_by` stamped by trigger. Its interview
   questions (1–10, five defaults) are what each interview rates.
 - `job_applications` — written only by `submit_application` (security
   definer, callable by anon) and `application_add` (HR: an open job, due
@@ -632,7 +639,8 @@ Full detail in `supabase/schema.sql`.
 - Leave: insert (`leaves_guard` validates) → `leave_decide` by HR and the
   manager, in either order → approved. Approvers are resolved from the org
   chart at decision time, not stored at application.
-- Public application: `job_posting` + `public_branding` → CV upload into the
+- Public application: `job_postings` (the list) → `job_posting` +
+  `public_branding` → CV upload into the
   job's folder → `submit_application`, which re-checks the job and that the
   file is there.
 - Branding save: upload new logo → update the row → remove the old file.

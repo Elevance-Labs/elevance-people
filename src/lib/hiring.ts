@@ -21,9 +21,19 @@ export const JOB_OPENING_WITH_NAMES =
   'designation:designations!job_openings_designation_fkey(title), ' +
   'manager:employees!job_openings_manager_id_fkey(full_name), application_count'
 
-// The public page for a job. HashRouter, so it works under any Pages path.
-export function publicJobUrl(jobId: string) {
-  return `${window.location.origin}${window.location.pathname}#/careers/${jobId}`
+// The public careers pages take ?branding=off to drop the top bar (logo and
+// company name), e.g. for a link shared from somewhere already branded.
+export const BRANDING_PARAM = 'branding'
+export const brandingQuery = (branded: boolean) => (branded ? '' : `?${BRANDING_PARAM}=off`)
+export const showsBranding = (params: URLSearchParams) => params.get(BRANDING_PARAM) !== 'off'
+
+// The public pages. HashRouter, so they work under any Pages path.
+export function publicCareersUrl(branded = true) {
+  return `${window.location.origin}${window.location.pathname}#/careers${brandingQuery(branded)}`
+}
+
+export function publicJobUrl(jobId: string, branded = true) {
+  return `${window.location.origin}${window.location.pathname}#/careers/${jobId}${brandingQuery(branded)}`
 }
 
 export function logoUrl(path: string | null) {

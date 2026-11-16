@@ -1160,6 +1160,16 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     }
   },
 
+  // Every open job still taking applications, newest first.
+  job_postings: () =>
+    rowsIn('job_openings')
+      .filter((j) => j.status === 'open' && (!j.due_date || String(j.due_date) >= new Date().toISOString().slice(0, 10)))
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      .map((j) => ({
+        id: j.id, title: j.title, department: find('departments', j.department_id)?.name,
+        designation: find('designations', j.designation_id)?.title, due_date: j.due_date, description: j.description,
+      })),
+
   on_hiring_team: () => {
     const me = authState.bound?.id
     return rowsIn('job_openings').some((j) => j.manager_id === me) ||

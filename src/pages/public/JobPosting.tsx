@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { useParams } from 'react-router-dom'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import {
   Alert,
   Box,
@@ -8,27 +8,26 @@ import {
   CardContent,
   CircularProgress,
   Container,
-  CssBaseline,
   Grid,
   InputAdornment,
   MenuItem,
   Paper,
   Stack,
   TextField,
-  ThemeProvider,
   Typography,
 } from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AttachFileIcon from '@mui/icons-material/AttachFile'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
 import EventOutlinedIcon from '@mui/icons-material/EventOutlined'
 import WorkOutlineIcon from '@mui/icons-material/WorkOutlined'
-import { Logo } from '../../components/common'
+import { CareersFrame, Perks } from '../../components/Careers'
+import { useBrandingParam, usePageTitle, usePublicBranding } from '../../components/useCareers'
 import { RichTextView } from '../../components/RichTextView'
 import { APPLICATIONS_BUCKET, supabase } from '../../lib/supabase'
 import { COMPANY_NAME, CV_MAX_BYTES, formatDate, SALARY_CURRENCIES } from '../../lib/constants'
-import { applicationError, logoUrl, MAX_NOTICE_DAYS } from '../../lib/hiring'
-import { brandedTheme, DEFAULT_PRIMARY } from '../../theme'
-import type { Branding, JobPosting as Posting, SalaryCurrency } from '../../lib/types'
+import { applicationError, MAX_NOTICE_DAYS } from '../../lib/hiring'
+import type { JobPosting as Posting, SalaryCurrency } from '../../lib/types'
 
 const EMPTY = {
   full_name: '',
@@ -47,147 +46,97 @@ const EMPTY = {
 // submit_application after uploading the CV into the job's folder.
 export default function JobPosting() {
   const { id = '' } = useParams()
+  const { branding, loaded } = usePublicBranding()
+  const { branded, query } = useBrandingParam()
   const [job, setJob] = useState<Posting | null>(null)
-  const [branding, setBranding] = useState<Branding | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [jobLoaded, setJobLoaded] = useState(false)
 
   useEffect(() => {
-    setLoading(true)
-    Promise.all([
-      supabase.rpc('job_posting', { p_id: id }).maybeSingle(),
-      supabase.rpc('public_branding').maybeSingle(),
-    ]).then(([jobRes, brandingRes]) => {
-      // A malformed id is just a job that doesn't exist.
-      setJob((jobRes.data as Posting | null) ?? null)
-      setBranding((brandingRes.data as Branding | null) ?? null)
-      setLoading(false)
-    })
+    setJobLoaded(false)
+    supabase
+      .rpc('job_posting', { p_id: id })
+      .maybeSingle()
+      .then(({ data }) => {
+        // A malformed id is just a job that doesn't exist.
+        setJob((data as Posting | null) ?? null)
+        setJobLoaded(true)
+      })
   }, [id])
 
-  const color = branding?.primary_color ?? DEFAULT_PRIMARY
-  const theme = useMemo(() => brandedTheme(color), [color])
-
-  useEffect(() => {
-    const previous = document.title
-    document.title = job ? `${job.title} · ${COMPANY_NAME}` : `Careers · ${COMPANY_NAME}`
-    return () => {
-      document.title = previous
-    }
-  }, [job])
-
-  return (
-    <ThemeProvider theme={theme}>
-      {/* Always light: the company's branded page sets its own scheme. */}
-      <CssBaseline enableColorScheme />
-      <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-        <Box component="header" sx={{ bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
-          <Container maxWidth="lg" sx={{ py: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            {branding?.logo_path ? (
-              <Box
-                component="img"
-                src={logoUrl(branding.logo_path) ?? undefined}
-                alt={COMPANY_NAME}
-                sx={{ height: 36, maxWidth: 200, objectFit: 'contain' }}
-              />
-            ) : (
-              <>
-                <Logo />
-                <Typography variant="h6" component="div">
-                  {COMPANY_NAME}
-                </Typography>
-              </>
-            )}
-          </Container>
-        </Box>
-
-        {loading ? (
-          <Box sx={{ display: 'grid', placeItems: 'center', py: 12 }}>
-            <CircularProgress />
-          </Box>
-        ) : !job ? (
-          <Container maxWidth="sm" sx={{ py: 10, textAlign: 'center' }}>
-            <WorkOutlineIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
-            <Typography variant="h5" component="h1" sx={{ mt: 2 }}>
-              This job isn’t open
-            </Typography>
-            <Typography sx={{ color: 'text.secondary', mt: 1 }}>
-              It may have been filled or closed, or the link may be wrong.
-            </Typography>
-          </Container>
-        ) : (
-          <>
-            <Box sx={{ bgcolor: 'primary.main', color: 'primary.contrastText' }}>
-              <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 } }}>
-                <Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
-                  {job.title}
-                </Typography>
-                <Stack
-                  direction="row"
-                  spacing={2.5}
-                  sx={{ mt: 1.5, opacity: 0.9, flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}
-                >
-                  <Typography>{[job.designation, job.department].join(' · ')}</Typography>
-                  {job.due_date && (
-                    <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-                      <EventOutlinedIcon fontSize="small" />
-                      <Typography>Apply by {formatDate(job.due_date)}</Typography>
-                    </Stack>
-                  )}
-                </Stack>
-              </Container>
-            </Box>
-
-            <Container maxWidth="lg" sx={{ py: { xs: 3, md: 5 } }}>
-              <Grid container spacing={{ xs: 3, md: 4 }}>
-                <Grid size={{ xs: 12, md: 7, lg: 8 }}>
-                  <Stack spacing={3}>
-                    <Paper variant="outlined" sx={{ p: { xs: 2.5, sm: 4 } }}>
-                      {job.description ? (
-                        <RichTextView html={job.description} />
-                      ) : (
-                        <Typography sx={{ color: 'text.secondary' }}>No description yet.</Typography>
-                      )}
-                    </Paper>
-                    {!!branding?.perks.length && <Perks perks={branding.perks} />}
-                  </Stack>
-                </Grid>
-                <Grid size={{ xs: 12, md: 5, lg: 4 }}>
-                  <Box sx={{ position: { md: 'sticky' }, top: { md: 24 } }}>
-                    <ApplyForm job={job} />
-                  </Box>
-                </Grid>
-              </Grid>
-            </Container>
-          </>
-        )}
-      </Box>
-    </ThemeProvider>
+  usePageTitle(job ? `${job.title} · ${COMPANY_NAME}` : `Careers · ${COMPANY_NAME}`)
+  const allJobs = (
+    <Button component={Link} to={`/careers${query}`} color="inherit" startIcon={<ArrowBackIcon />} sx={{ ml: -1 }}>
+      All open positions
+    </Button>
   )
-}
 
-function Perks({ perks }: { perks: Branding['perks'] }) {
   return (
-    <Box>
-      <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
-        Perks and benefits
-      </Typography>
-      <Grid container spacing={2}>
-        {perks.map((perk, i) => (
-          <Grid key={i} size={{ xs: 12, sm: 6 }}>
-            <Paper variant="outlined" sx={{ p: 2.5, height: '100%', borderLeft: 3, borderLeftColor: 'primary.main' }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                {perk.title}
+    <CareersFrame branding={branding} branded={branded}>
+      {!loaded || !jobLoaded ? (
+        <Box sx={{ display: 'grid', placeItems: 'center', py: 12 }}>
+          <CircularProgress />
+        </Box>
+      ) : !job ? (
+        <Container maxWidth="sm" sx={{ py: 10, textAlign: 'center' }}>
+          <WorkOutlineIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
+          <Typography variant="h5" component="h1" sx={{ mt: 2 }}>
+            This job isn’t open
+          </Typography>
+          <Typography sx={{ color: 'text.secondary', mt: 1, mb: 3 }}>
+            It may have been filled or closed, or the link may be wrong.
+          </Typography>
+          <Button component={Link} to={`/careers${query}`} variant="outlined">
+            See open positions
+          </Button>
+        </Container>
+      ) : (
+        <>
+          <Box sx={{ bgcolor: 'primary.main', color: 'primary.contrastText' }}>
+            <Container maxWidth="lg" sx={{ pt: { xs: 2, md: 3 }, pb: { xs: 4, md: 6 } }}>
+              <Box sx={{ mb: { xs: 1.5, md: 2 }, opacity: 0.9 }}>{allJobs}</Box>
+              <Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
+                {job.title}
               </Typography>
-              {perk.description && (
-                <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-                  {perk.description}
-                </Typography>
-              )}
-            </Paper>
-          </Grid>
-        ))}
-      </Grid>
-    </Box>
+              <Stack
+                direction="row"
+                spacing={2.5}
+                sx={{ mt: 1.5, opacity: 0.9, flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}
+              >
+                <Typography>{[job.designation, job.department].join(' · ')}</Typography>
+                {job.due_date && (
+                  <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                    <EventOutlinedIcon fontSize="small" />
+                    <Typography>Apply by {formatDate(job.due_date)}</Typography>
+                  </Stack>
+                )}
+              </Stack>
+            </Container>
+          </Box>
+
+          <Container maxWidth="lg" sx={{ py: { xs: 3, md: 5 } }}>
+            <Grid container spacing={{ xs: 3, md: 4 }}>
+              <Grid size={{ xs: 12, md: 7, lg: 8 }}>
+                <Stack spacing={3}>
+                  <Paper variant="outlined" sx={{ p: { xs: 2.5, sm: 4 } }}>
+                    {job.description ? (
+                      <RichTextView html={job.description} />
+                    ) : (
+                      <Typography sx={{ color: 'text.secondary' }}>No description yet.</Typography>
+                    )}
+                  </Paper>
+                  {!!branding?.perks.length && <Perks perks={branding.perks} />}
+                </Stack>
+              </Grid>
+              <Grid size={{ xs: 12, md: 5, lg: 4 }}>
+                <Box sx={{ position: { md: 'sticky' }, top: { md: 24 } }}>
+                  <ApplyForm job={job} />
+                </Box>
+              </Grid>
+            </Grid>
+          </Container>
+        </>
+      )}
+    </CareersFrame>
   )
 }
 

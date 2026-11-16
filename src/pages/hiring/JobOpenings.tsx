@@ -6,6 +6,9 @@ import {
   IconButton,
   LinearProgress,
   Link as MuiLink,
+  ListItemIcon,
+  ListItemText,
+  Menu,
   MenuItem,
   Paper,
   Snackbar,
@@ -21,12 +24,19 @@ import {
   Typography,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import { JobStatusChip, PageHeader } from '../../components/common'
 import { supabase } from '../../lib/supabase'
 import { JOB_STATUS_LABELS, formatDate } from '../../lib/constants'
-import { JOB_OPENING_WITH_NAMES, copyText, publicJobUrl, type JobOpeningWithNames } from '../../lib/hiring'
+import {
+  JOB_OPENING_WITH_NAMES,
+  copyText,
+  publicCareersUrl,
+  publicJobUrl,
+  type JobOpeningWithNames,
+} from '../../lib/hiring'
 import type { JobOpeningStatus } from '../../lib/types'
 
 // The job list's order: open first, closed last.
@@ -39,6 +49,7 @@ export default function JobOpenings() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<JobOpeningStatus | ''>('')
   const [copied, setCopied] = useState<string | null>(null)
+  const [careersMenu, setCareersMenu] = useState<HTMLElement | null>(null)
 
   useEffect(() => {
     supabase
@@ -61,17 +72,67 @@ export default function JobOpenings() {
     setCopied((await copyText(url)) ? 'Public link copied' : url)
   }
 
+  // The careers page lists every open job taking applications.
+  async function copyCareersLink(branded: boolean) {
+    setCareersMenu(null)
+    const url = publicCareersUrl(branded)
+    setCopied((await copyText(url)) ? 'Careers page link copied' : url)
+  }
+
   return (
     <>
       <PageHeader
         title="Job openings"
         subtitle={loading ? 'Loading…' : `${rows.length} ${rows.length === 1 ? 'job' : 'jobs'}`}
         actions={
-          <Button variant="contained" startIcon={<AddIcon />} component={Link} to="/jobs/new">
-            New job opening
-          </Button>
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined"
+              endIcon={<ArrowDropDownIcon />}
+              aria-haspopup="menu"
+              onClick={(e) => setCareersMenu(e.currentTarget)}
+            >
+              Careers page
+            </Button>
+            <Button variant="contained" startIcon={<AddIcon />} component={Link} to="/jobs/new">
+              New job opening
+            </Button>
+          </Stack>
         }
       />
+
+      <Menu
+        anchorEl={careersMenu}
+        open={!!careersMenu}
+        onClose={() => setCareersMenu(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <MenuItem onClick={() => copyCareersLink(true)}>
+          <ListItemIcon>
+            <ContentCopyIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Copy link" secondary="With the logo bar at the top" />
+        </MenuItem>
+        <MenuItem onClick={() => copyCareersLink(false)}>
+          <ListItemIcon>
+            <ContentCopyIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Copy link without branding" secondary="No logo bar at the top" />
+        </MenuItem>
+        <MenuItem
+          component="a"
+          href={publicCareersUrl()}
+          target="_blank"
+          rel="noopener"
+          onClick={() => setCareersMenu(null)}
+        >
+          <ListItemIcon>
+            <OpenInNewIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Open careers page" />
+        </MenuItem>
+      </Menu>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>

@@ -33,6 +33,12 @@ check('…and it reads only through the public functions',
   `${captured.reads.join()} | ${captured.rpcs.map((r) => r.name).join()}`)
 
 reset()
+await mountApp('/careers')
+check('signed out, the list of open jobs shows, not the login page',
+  text().includes('Open positions') && text().includes('Frontend Engineer') && !text().includes('Sign in with Google'),
+  text().slice(0, 200))
+
+reset()
 signInAs(PEOPLE.member)
 await mountApp('/careers/j-open')
 check('a signed-in employee sees the public page too, without the app shell',

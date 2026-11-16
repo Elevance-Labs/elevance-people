@@ -1972,6 +1972,18 @@ language sql stable security definer set search_path = '' as $$
    where j.id = p_id and j.status = 'open';
 $$;
 
+-- Every open job still taking applications, for the public list.
+create function public.job_postings()
+returns table (id uuid, title text, department text, designation text, due_date date, description text)
+language sql stable security definer set search_path = '' as $$
+  select j.id, j.title, d.name, g.title, j.due_date, j.description
+    from public.job_openings j
+    join public.departments d on d.id = j.department_id
+    join public.designations g on g.id = j.designation_id
+   where j.status = 'open' and (j.due_date is null or j.due_date >= current_date)
+   order by j.created_at desc, j.title;
+$$;
+
 create function public.public_branding()
 returns table (logo_path text, primary_color text, perks jsonb)
 language sql stable security definer set search_path = '' as $$
@@ -4321,7 +4333,8 @@ revoke execute on function
   public.leave_decide(uuid, boolean, text), public.leave_cancel(uuid),
   public.leave_balances(uuid, integer), public.valid_perks(jsonb), public.job_openings_stamp(),
   public.valid_interview_questions(text[]),
-  public.job_accepts_applications(text), public.job_posting(uuid), public.public_branding(),
+  public.job_accepts_applications(text), public.job_posting(uuid), public.job_postings(),
+  public.public_branding(),
   public.submit_application(uuid, text, text, text, integer, text, integer, text, text, integer, text, text, text),
   public.announcements_stamp(),
   public.application_next_stages(public.application_stage),
@@ -4428,9 +4441,10 @@ grant execute on function public.my_payslips() to authenticated;
 revoke execute on function public.who_is_off() from public, anon, authenticated;
 grant execute on function public.who_is_off() to authenticated;
 
--- The public job page, for people who aren't signed in.
+-- The public job pages, for people who aren't signed in.
 grant execute on function
-  public.job_accepts_applications(text), public.job_posting(uuid), public.public_branding(),
+  public.job_accepts_applications(text), public.job_posting(uuid), public.job_postings(),
+  public.public_branding(),
   public.submit_application(uuid, text, text, text, integer, text, integer, text, text, integer, text, text, text)
   to anon, authenticated;
 

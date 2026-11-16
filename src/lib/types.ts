@@ -299,6 +299,10 @@ export interface JobPosting {
   accepting: boolean
 }
 
+// A row of the job_postings RPC: an open job taking applications, for the
+// public list of jobs.
+export type JobPostingSummary = Omit<JobPosting, 'accepting'>
+
 export interface Perk {
   title: string
   description: string | null

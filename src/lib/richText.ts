@@ -19,6 +19,14 @@ export function sanitizeHtml(html: string) {
   return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR })
 }
 
+// Plain text of stored HTML, for a short excerpt: sanitised first, then read
+// as text (never rendered), with a space wherever a tag was.
+export function htmlToText(html: string | null | undefined) {
+  if (!html) return ''
+  const dom = DOMPurify.sanitize(html.replace(/</g, ' <'), { ALLOWED_TAGS, ALLOWED_ATTR, RETURN_DOM: true })
+  return (dom.textContent ?? '').replace(/\s+/g, ' ').trim()
+}
+
 export function isBlankHtml(html: string | null | undefined) {
   return !html || !html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()
 }
