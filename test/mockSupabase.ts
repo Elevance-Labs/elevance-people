@@ -206,7 +206,8 @@ const JOB_OPENING_INTERVIEWERS: Row[] = [{ job_opening_id: 'j-open', employee_id
 function application(id: string, full_name: string, stage: string, expected_salary: number, extra: Row = {}): Row {
   return {
     id, job_opening_id: 'j-open', full_name, email: `${id}@example.com`, phone: '0300 1234567',
-    expected_salary, current_salary: null, hr_notes: null, note: null, resume_path: `j-open/${id}.pdf`, resume_name: `${full_name} CV.pdf`,
+    expected_salary, current_salary: null, current_salary_currency: 'PKR', current_benefits: null, hr_notes: null,
+    switch_reason: null, notice_period_days: null, note: null, resume_path: `j-open/${id}.pdf`, resume_name: `${full_name} CV.pdf`,
     created_at: '2026-05-10T09:00:00Z', stage, stage_changed_at: '2026-05-20T09:00:00Z', ...extra,
   }
 }
@@ -217,7 +218,8 @@ const JOB_APPLICATIONS: Row[] = [
   application('a-new', 'Zara Malik', 'new', 180000),
   application('a-short', 'Hamza Ali', 'shortlisted', 250000, { note: 'Available from July.' }),
   application('a-int', 'Ayesha Noor', 'interview_1', 300000, {
-    current_salary: 260000, hr_notes: 'Notice period of one month.',
+    current_salary: 260000, hr_notes: 'Strong portfolio.', current_benefits: 'Health cover for family.',
+    switch_reason: 'Wants product work.', notice_period_days: 30,
   }),
   application('a-cleared', 'Fatima Shah', 'cleared', 320000),
   application('a-rej', 'Usman Tariq', 'rejected', 150000),
@@ -1170,13 +1172,25 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     const me = authState.bound
     const hr = me?.app_role === 'hr_admin' || me?.app_role === 'company_admin'
     return a && (hr || find('job_openings', a.job_opening_id)?.manager_id === me?.id)
-      ? { current_salary: a.current_salary, expected_salary: a.expected_salary, hr_notes: a.hr_notes }
+      ? {
+          current_salary: a.current_salary, current_salary_currency: a.current_salary_currency,
+          expected_salary: a.expected_salary, current_benefits: a.current_benefits, hr_notes: a.hr_notes,
+        }
       : null
   },
 
-  application_set_hr_details: ({ p_application_id: id, p_current_salary, p_hr_notes }) => {
+  application_set_hr_details: ({
+    p_application_id: id, p_current_salary, p_current_salary_currency, p_current_benefits, p_switch_reason,
+    p_notice_period_days, p_hr_notes,
+  }) => {
     const a = find('job_applications', id)
-    if (a) Object.assign(a, { current_salary: p_current_salary, hr_notes: p_hr_notes })
+    if (a) {
+      Object.assign(a, {
+        current_salary: p_current_salary, hr_notes: p_hr_notes, current_benefits: p_current_benefits,
+        switch_reason: p_switch_reason, notice_period_days: p_notice_period_days,
+        current_salary_currency: p_current_salary_currency ?? a.current_salary_currency,
+      })
+    }
     return null
   },
 
@@ -1456,7 +1470,10 @@ const RPCS: Record<string, (args: Row) => unknown> = {
   submit_application: (a) => {
     rowsIn('job_applications').push({
       id: `new-${nextId++}`, job_opening_id: a.p_job_opening_id, full_name: a.p_full_name, email: a.p_email,
-      phone: a.p_phone, expected_salary: a.p_expected_salary, note: a.p_note, resume_path: a.p_resume_path, resume_name: a.p_resume_name,
+      phone: a.p_phone, current_salary: a.p_current_salary, current_salary_currency: a.p_current_salary_currency,
+      expected_salary: a.p_expected_salary, current_benefits: a.p_current_benefits || null,
+      switch_reason: a.p_switch_reason || null, notice_period_days: a.p_notice_period_days, note: a.p_note || null,
+      resume_path: a.p_resume_path, resume_name: a.p_resume_name, stage: 'new', hr_notes: null,
     })
     return null
   },

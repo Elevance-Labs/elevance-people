@@ -216,6 +216,8 @@ export type ApplicationStage =
   | 'abandoned'
   | 'declined'
 
+export type SalaryCurrency = 'PKR' | 'USD'
+
 export interface JobApplication {
   id: string
   job_opening_id: string
@@ -224,10 +226,18 @@ export interface JobApplication {
   phone: string
   // Monthly, in PKR. Null only on applications sent before it was asked.
   expected_salary: number | null
-  // HR's: monthly, in PKR, and one block of notes.
+  // Monthly, in its currency: the applicant's, which HR can correct. Null
+  // only on applications sent before it was asked and left blank by HR.
   current_salary: number | null
+  current_salary_currency: SalaryCurrency
+  // The applicant's current employer's benefits (optional).
+  current_benefits: string | null
+  // HR's one block of notes.
   hr_notes: string | null
-  // Clients can't select these three: read them through application_hr_details.
+  // Clients can't select these five: read them through application_hr_details.
+  // The applicant's, optional.
+  switch_reason: string | null
+  notice_period_days: number | null
   stage: ApplicationStage
   stage_changed_at: string
   note: string | null

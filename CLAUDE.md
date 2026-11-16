@@ -93,20 +93,21 @@ behaviour).
   (finance, with the payment details). Nobody decides a claim they are the
   employee of or made.
 - **Column grants also hide.** Clients can't select
-  `job_applications.expected_salary`, `current_salary` or `hr_notes`; HR and
-  the hiring manager read them via `application_hr_details`, and only HR
-  writes the last two, via `application_set_hr_details`. Never select `*` from that table, nor embed
+  `job_applications.expected_salary`, `current_salary` (and its currency),
+  `current_benefits` or `hr_notes`; HR and the hiring manager read them via
+  `application_hr_details`, and only HR changes the applicant's details
+  (not the expected salary) and notes, via `application_set_hr_details`. Never select `*` from that table, nor embed
   `job_applications(count)` (PostgREST makes that a whole-row reference, which
   is refused); count with the `application_count` computed field.
 - **Stored HTML is untrusted.** Job descriptions and announcements are
   sanitised on save and again on render (`lib/richText.ts`); never render one
   any other way.
-- **One shell, three apps.** The theme (indigo, Roboto, bold `h5` titles) and
+- **One shell, four apps.** The theme (indigo, Roboto, bold `h5` titles) and
   the layout (header: switcher, logo, account button with name and role;
   tinted current page; navigation that folds to a rail from **Collapse** at its
   foot, via `components/useNavCollapsed`, one localStorage key shared by the
   apps; the first load is the app's icon over a running bar, `Splash` in `components/common`)
-  match Work, Support and People. A change to either belongs in all three.
+  match Work, Support, People and Grow. A change to either belongs in all four.
 - **Light, dark or system.** `theme.ts` has both colour schemes (no CSS
   variables, so `theme.palette` is the mode in use); `ThemeProvider` takes
   `themeSettings` (one localStorage key, `elevance.theme`, shared by the
@@ -115,8 +116,8 @@ behaviour).
   `divider`, `text.*`); a fixed hex is for brand or data only, and accent text
   on the handbook pages goes through `readableInk`. The public job page stays
   light (`brandedTheme`).
-- **One of three apps.** `lib/suite.ts` lists the suite (Work, Support,
-  People), where each lives (the sibling folder, or `VITE_SUITE_*_URL`) and the
+- **One of four apps.** `lib/suite.ts` lists the suite (Work, Support,
+  People, Grow), where each lives (the sibling folder, or `VITE_SUITE_*_URL`) and the
   `?sso=<company email>` hand-over; `components/AppSwitcher` is the grid icon
   before the logo, hidden when running installed (`components/useStandalone`). `AuthProvider` takes the hint once at load, strips it from
   the address and, with no session, goes to Google with `login_hint` and no
@@ -427,9 +428,13 @@ Full detail in `supabase/schema.sql`.
   until `due_date`. `created_by` stamped by trigger. Its interview
   questions (1–10, five defaults) are what each interview rates.
 - `job_applications` — written only by `submit_application` (security
-  definer, callable by anon); HR's current salary and notes only by
-  `application_set_hr_details`, read with the expected salary through
-  `application_hr_details` (HR and the hiring manager). `stage` (enum, starts `new`) changes only via
+  definer, callable by anon): the applicant gives current salary (PKR or
+  USD) and expected salary, and optionally current benefits, reason for
+  switching, notice period and a note. HR fills in or corrects all but the
+  expected salary and the note, and writes notes, only by
+  `application_set_hr_details`; the salaries, benefits
+  and notes are read through `application_hr_details` (HR and the hiring
+  manager). `stage` (enum, starts `new`) changes only via
   `application_move` (allowed steps in `application_next_stages`; text
   required per `application_stage_needs_reason`), `application_hire` (to
   hired) and HR's `application_undo`. Visible to HR, and to the hiring team from shortlisted

@@ -41,9 +41,12 @@ import {
   TEST_FILE_ACCEPT,
   formatDay,
   formatDayTime,
+  formatMoney,
   formatPkr,
+  SALARY_CURRENCIES,
 } from '../../lib/constants'
 import {
+  MAX_NOTICE_DAYS,
   MAX_TEST_FILES,
   NEEDS_REASON,
   NEEDS_TEXT,
@@ -68,6 +71,7 @@ import type {
   ApplicationTestFile,
   DirectoryEntry,
   Onboarding,
+  SalaryCurrency,
 } from '../../lib/types'
 
 // Long enough to read a CV without the viewer's link expiring.
@@ -109,6 +113,19 @@ function Fact({ icon, children }: { icon: ReactElement; children: ReactNode }) {
   )
 }
 
+function ApplicantAnswer({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Box>
+      <Typography variant="caption" component="div" sx={{ color: 'text.secondary' }}>
+        {label}
+      </Typography>
+      <Typography variant="body2" aria-label={label} sx={{ whiteSpace: 'pre-wrap' }}>
+        {children}
+      </Typography>
+    </Box>
+  )
+}
+
 export default function ApplicationDialog({
   application: a,
   jobTitle,
@@ -116,6 +133,7 @@ export default function ApplicationDialog({
   people,
   canAttachTests,
   onMoved,
+  onChanged,
   onClose,
 }: {
   application: BoardApplication
@@ -126,6 +144,8 @@ export default function ApplicationDialog({
   // HR or the job's hiring manager: may attach and remove test files.
   canAttachTests: boolean
   onMoved: (stage: ApplicationStage) => Promise<void>
+  // HR changed the applicant's details: reload the application.
+  onChanged: () => Promise<void>
   onClose: () => void
 }) {
   const { isHr } = useAuth()
@@ -136,6 +156,10 @@ export default function ApplicationDialog({
   const [details, setDetails] = useState<ApplicationHrDetails | null>(null)
   // HR's edits to the current salary and notes.
   const [currentSalary, setCurrentSalary] = useState('')
+  const [currency, setCurrency] = useState<SalaryCurrency>('PKR')
+  const [benefits, setBenefits] = useState('')
+  const [switchReason, setSwitchReason] = useState('')
+  const [noticeDays, setNoticeDays] = useState('')
   const [hrNotes, setHrNotes] = useState('')
   const [savingDetails, setSavingDetails] = useState(false)
   const [events, setEvents] = useState<ApplicationStageEvent[]>([])
@@ -206,9 +230,17 @@ export default function ApplicationDialog({
       .then(({ data }) => {
         setDetails(data ?? null)
         setCurrentSalary(data?.current_salary?.toString() ?? '')
+        setCurrency(data?.current_salary_currency ?? 'PKR')
+        setBenefits(data?.current_benefits ?? '')
         setHrNotes(data?.hr_notes ?? '')
       })
   }, [a.id, a.resume_path])
+
+  // From the board's row, so they follow a reload after HR saves.
+  useEffect(() => {
+    setSwitchReason(a.switch_reason ?? '')
+    setNoticeDays(a.notice_period_days?.toString() ?? '')
+  }, [a.id, a.switch_reason, a.notice_period_days])
 
   // Reloads when the stage changes, whoever moved it.
   useEffect(() => {
@@ -315,23 +347,46 @@ export default function ApplicationDialog({
   const detailsChanged =
     !!details &&
     (currentSalary.trim() !== (details.current_salary?.toString() ?? '') ||
+      currency !== details.current_salary_currency ||
+      benefits.trim() !== (details.current_benefits ?? '') ||
+      switchReason.trim() !== (a.switch_reason ?? '') ||
+      noticeDays.trim() !== (a.notice_period_days?.toString() ?? '') ||
       hrNotes.trim() !== (details.hr_notes ?? ''))
 
   async function saveDetails() {
     const salary = currentSalary.trim()
-    if (salary && !/^\d+$/.test(salary)) return setError('Enter the current salary as a whole number of rupees.')
+    if (salary && !/^\d+$/.test(salary)) return setError('Enter the current salary as a whole number.')
+    const notice = noticeDays.trim()
+    if (notice && (!/^\d+$/.test(notice) || Number(notice) > MAX_NOTICE_DAYS)) {
+      return setError(`Enter the notice period as a whole number of days, up to ${MAX_NOTICE_DAYS}.`)
+    }
     setSavingDetails(true)
     setError(null)
-    const next = { current_salary: salary ? Number(salary) : null, hr_notes: hrNotes.trim() || null }
+    const next = {
+      current_salary: salary ? Number(salary) : null,
+      current_salary_currency: currency,
+      current_benefits: benefits.trim() || null,
+      hr_notes: hrNotes.trim() || null,
+    }
     const { error: saveError } = await supabase.rpc('application_set_hr_details', {
       p_application_id: a.id,
       p_current_salary: next.current_salary,
+      p_current_salary_currency: next.current_salary_currency,
+      p_current_benefits: next.current_benefits,
+      p_switch_reason: switchReason.trim() || null,
+      p_notice_period_days: notice ? Number(notice) : null,
       p_hr_notes: next.hr_notes,
     })
-    setSavingDetails(false)
-    if (saveError) return setError(saveError.message)
+    if (saveError) {
+      setSavingDetails(false)
+      return setError(saveError.message)
+    }
     setDetails((d) => d && { ...d, ...next })
+    setBenefits(next.current_benefits ?? '')
     setHrNotes(next.hr_notes ?? '')
+    // The reason and notice period are on the board's row.
+    await onChanged()
+    setSavingDetails(false)
   }
 
   async function undoMove() {
@@ -386,7 +441,10 @@ export default function ApplicationDialog({
             </Fact>
             {details?.current_salary != null && (
               <Fact icon={<PaymentsOutlinedIcon fontSize="small" />}>
-                <span aria-label="Current salary">{formatPkr(details.current_salary)}</span> / month current
+                <span aria-label="Current salary">
+                  {formatMoney(details.current_salary, details.current_salary_currency)}
+                </span>{' '}
+                / month current
               </Fact>
             )}
             {details?.expected_salary != null && (
@@ -733,10 +791,11 @@ export default function ApplicationDialog({
             <>
               <Divider sx={{ my: 3 }} />
               <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0 }}>
-                HR notes
+                Applicant details
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-                Seen by HR and the hiring manager only.
+                Fill in or correct what the applicant gave. The salaries, benefits and HR notes are seen by HR
+                and the hiring manager only.
               </Typography>
               <Stack
                 component="form"
@@ -746,20 +805,61 @@ export default function ApplicationDialog({
                   saveDetails()
                 }}
               >
+                <Stack direction="row" spacing={1.5}>
+                  <TextField
+                    select
+                    label="Currency"
+                    value={currency}
+                    onChange={(e) => setCurrency(e.target.value as SalaryCurrency)}
+                    sx={{ width: 104, flexShrink: 0 }}
+                  >
+                    {SALARY_CURRENCIES.map((c) => (
+                      <MenuItem key={c} value={c}>
+                        {c}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField
+                    label="Current salary"
+                    type="number"
+                    helperText="Per month, as the applicant gave it"
+                    value={currentSalary}
+                    onChange={(e) => setCurrentSalary(e.target.value)}
+                    slotProps={{ htmlInput: { min: 0, step: 1, inputMode: 'numeric' } }}
+                    fullWidth
+                  />
+                </Stack>
                 <TextField
-                  label="Current salary"
+                  label="Current employer benefits"
+                  multiline
+                  minRows={2}
+                  value={benefits}
+                  onChange={(e) => setBenefits(e.target.value)}
+                  slotProps={{ htmlInput: { maxLength: 2000 } }}
+                  fullWidth
+                />
+                <TextField
+                  label="Reason for switching"
+                  multiline
+                  minRows={2}
+                  value={switchReason}
+                  onChange={(e) => setSwitchReason(e.target.value)}
+                  slotProps={{ htmlInput: { maxLength: 2000 } }}
+                  fullWidth
+                />
+                <TextField
+                  label="Notice period"
                   type="number"
-                  helperText="Per month"
-                  value={currentSalary}
-                  onChange={(e) => setCurrentSalary(e.target.value)}
+                  value={noticeDays}
+                  onChange={(e) => setNoticeDays(e.target.value)}
                   slotProps={{
-                    input: { startAdornment: <InputAdornment position="start">PKR</InputAdornment> },
-                    htmlInput: { min: 0, step: 1, inputMode: 'numeric' },
+                    input: { endAdornment: <InputAdornment position="end">days</InputAdornment> },
+                    htmlInput: { min: 0, max: MAX_NOTICE_DAYS, step: 1, inputMode: 'numeric' },
                   }}
                   fullWidth
                 />
                 <TextField
-                  label="Notes"
+                  label="HR notes"
                   multiline
                   minRows={3}
                   value={hrNotes}
@@ -786,16 +886,27 @@ export default function ApplicationDialog({
             </>
           )}
 
-          {a.note && (
-            <>
+          {/* HR has the first three in the form above. */}
+          {((!isHr && (a.notice_period_days != null || a.switch_reason || details?.current_benefits)) || a.note) && (
+            <Box aria-label="From the applicant" role="region">
               <Divider sx={{ my: 3 }} />
-              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-                Note from the applicant
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1.5 }}>
+                From the applicant
               </Typography>
-              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                {a.note}
-              </Typography>
-            </>
+              <Stack spacing={1.5}>
+                {!isHr && a.notice_period_days != null && (
+                  <ApplicantAnswer label="Notice period">
+                    {a.notice_period_days === 1 ? '1 day' : `${a.notice_period_days} days`}
+                  </ApplicantAnswer>
+                )}
+                {!isHr && a.switch_reason && <ApplicantAnswer label="Reason for switching">{a.switch_reason}</ApplicantAnswer>}
+                {/* Only HR and the hiring manager get the benefits, with the salaries. */}
+                {!isHr && details?.current_benefits && (
+                  <ApplicantAnswer label="Current employer benefits">{details.current_benefits}</ApplicantAnswer>
+                )}
+                {a.note && <ApplicantAnswer label="Notes">{a.note}</ApplicantAnswer>}
+              </Stack>
+            </Box>
           )}
 
           <Divider sx={{ my: 3 }} />

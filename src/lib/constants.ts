@@ -13,6 +13,7 @@ import type {
   OnboardingStatus,
   PayrollStatus,
   ReimbursementStatus,
+  SalaryCurrency,
   SalaryRevisionStatus,
 } from './types'
 
@@ -210,6 +211,13 @@ export const REIMBURSEMENT_STATUS_COLORS: Record<ReimbursementStatus, ChipProps[
 
 export function formatPkr(amount: number) {
   return `PKR ${amount.toLocaleString('en-PK')}`
+}
+
+// An applicant's current salary may be in either.
+export const SALARY_CURRENCIES: SalaryCurrency[] = ['PKR', 'USD']
+
+export function formatMoney(amount: number, currency: SalaryCurrency) {
+  return currency === 'USD' ? `USD ${amount.toLocaleString('en-US')}` : formatPkr(amount)
 }
 
 export const DOC_TYPES = [

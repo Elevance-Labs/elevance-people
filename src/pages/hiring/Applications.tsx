@@ -245,6 +245,9 @@ export default function Applications() {
           canAttachTests={isHr || (!!employee && job.manager_id === employee.id)}
           people={people}
           onMoved={moved}
+          onChanged={async () => {
+            await load(jobId)
+          }}
           onClose={() => setQuery(jobId, null)}
         />
       )}

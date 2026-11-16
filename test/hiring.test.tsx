@@ -4,7 +4,7 @@
 // submit_application); these checks prove the app asks for the right things.
 import {
   setupDom, reporter, text, button, buttons, click, type, choose, dialog, field, options, pickFile, row, waitFor,
-  freezeToday,
+  freezeToday, valueOf,
 } from './setup'
 setupDom()
 freezeToday('2026-06-10')
@@ -190,20 +190,33 @@ await pickFile(pdf('notes.docx', 'application/vnd.openxmlformats-officedocument.
 check('only a PDF is accepted as the CV', text().includes('Your CV must be a PDF.'))
 await pickFile(new File([new Uint8Array(6 * 1024 * 1024 + 1)], 'big.pdf', { type: 'application/pdf' }))
 check('a CV over 6 MB is refused', text().includes('Your CV is larger than 6 MB.'))
-check('the form asks for expected salary in PKR, before the CV',
-  !!field('Expected salary') && text().includes('PKR') &&
+check('the form asks for the current salary, in PKR by default, then the expected salary in PKR, before the CV',
+  !!field('Current salary') && valueOf('Currency') === 'PKR' && !!field('Expected salary') &&
+  text().indexOf('Current salary') < text().indexOf('Expected salary') &&
   text().indexOf('Expected salary') < text().indexOf('Attach CV / resume'))
-check('…but not for the current salary, which HR records', !field('Current salary'))
-await type('Full name', 'Zara Malik')
+const after = ['Current employer benefits', 'Reason for switching', 'Notice period', 'Notes']
+const labels = [...document.querySelectorAll('.MuiFormLabel-root')].map((l) => l.textContent?.replace(/[\s* ]+$/, '').trim())
+check('after the CV come benefits, reason for switching, notice period and notes, in that order, all optional',
+  after.every((l) => labels.includes(l)) && after.every((l) => text().indexOf('Attach CV / resume') < text().indexOf(l)) &&
+  after.every((l, i) => i === 0 || labels.indexOf(after[i - 1]) < labels.indexOf(l)) &&
+  after.every((l) => !field(l)!.querySelector('input, textarea')!.hasAttribute('required')), labels.join())
+await type('Full name (as per CNIC)', 'Zara Malik')
 await type('Email address', 'zara@example.com')
 await type('Phone number', '+92 300 1234567')
-await type('Note', 'Available from July.')
+await type('Notes', 'Available from July.')
 await click(button('Submit application'))
 // The browser's own validation stops these (required, step 1); the form re-checks before sending.
+const currentInput = () => field('Current salary')!.querySelector('input')!
 const salaryInput = () => field('Expected salary')!.querySelector('input')!
-check('submitting without an expected salary is stopped, and sends nothing',
-  salaryInput().validity.valueMissing && !captured.uploads.length &&
+check('submitting without the salaries is stopped, and sends nothing',
+  currentInput().validity.valueMissing && salaryInput().validity.valueMissing && !captured.uploads.length &&
   !captured.rpcs.some((r) => r.name === 'submit_application'))
+await type('Current salary', '1800')
+await choose('Currency', 'USD')
+check('the current salary can be in USD', valueOf('Currency') === 'USD')
+await click(button('Submit application'))
+check('…and still needs the expected salary',
+  salaryInput().validity.valueMissing && !captured.uploads.length)
 await type('Expected salary', '1.5')
 await click(button('Submit application'))
 check('…as is a salary that isn’t whole rupees', salaryInput().validity.stepMismatch && !captured.uploads.length)
@@ -213,6 +226,14 @@ check('submitting without a CV asks for one, and sends nothing',
   text().includes('Attach your CV as a PDF.') && !captured.uploads.length && !captured.rpcs.some((r) => r.name === 'submit_application'))
 
 await pickFile(pdf('Zara CV.pdf'))
+await type('Current employer benefits', ' Health cover, annual bonus ')
+await type('Reason for switching', 'Looking for product work.')
+await type('Notice period', '400')
+await click(button('Submit application'))
+check('a notice period over 365 days is stopped, and sends nothing',
+  field('Notice period')!.querySelector('input')!.validity.rangeOverflow && !captured.uploads.length &&
+  !captured.rpcs.some((r) => r.name === 'submit_application'))
+await type('Notice period', '30')
 await click(button('Submit application'))
 const upload = captured.uploads[0]
 check('the CV goes to the private bucket, inside the job’s folder, as a PDF',
@@ -222,30 +243,40 @@ const submitted = captured.rpcs.find((r) => r.name === 'submit_application')?.ar
 check('…then the application is submitted through the function, pointing at that file',
   JSON.stringify(submitted) === JSON.stringify({
     p_job_opening_id: 'j-open', p_full_name: 'Zara Malik', p_email: 'zara@example.com', p_phone: '+92 300 1234567',
-    p_expected_salary: 250000, p_note: 'Available from July.', p_resume_path: upload?.path, p_resume_name: 'Zara CV.pdf',
+    p_current_salary: 1800, p_current_salary_currency: 'USD', p_expected_salary: 250000,
+    p_current_benefits: ' Health cover, annual bonus ', p_switch_reason: 'Looking for product work.', p_notice_period_days: 30,
+    p_note: 'Available from July.', p_resume_path: upload?.path, p_resume_name: 'Zara CV.pdf',
   }), JSON.stringify(submitted))
 check('…and only after the upload', captured.calls.indexOf('storage.upload') < captured.calls.indexOf('rpc.submit_application'))
 check('the applicant is thanked', await waitFor(() => text().includes('Application sent') && text().includes('Thanks, Zara')))
-check('the application lands in the database', table('job_applications').some((a) => a.full_name === 'Zara Malik' && a.expected_salary === 250000))
+check('the application lands in the database',
+  table('job_applications').some((a) => a.full_name === 'Zara Malik' && a.expected_salary === 250000 &&
+    a.current_salary === 1800 && a.current_salary_currency === 'USD' && a.notice_period_days === 30))
 
 reset()
 await mountApp('/careers/j-open')
 failNext('rpc.submit_application', { code: '23505', message: 'duplicate key value violates unique constraint' })
-await type('Full name', 'Zara Malik')
+await type('Full name (as per CNIC)', 'Zara Malik')
 await type('Email address', 'zara@example.com')
 await type('Phone number', '0300')
+await type('Current salary', '150000')
 await type('Expected salary', '200000')
 await pickFile(pdf())
 await click(button('Submit application'))
 check('applying twice with the same email is explained',
   await waitFor(() => text().includes('You’ve already applied for this job with this email address.')))
+const bare = captured.rpcs.find((r) => r.name === 'submit_application')?.args
+check('left empty, the optional fields go as blanks (no notice period), and the currency as PKR',
+  bare?.p_current_salary === 150000 && bare?.p_current_salary_currency === 'PKR' && bare?.p_current_benefits === '' &&
+  bare?.p_switch_reason === '' && bare?.p_notice_period_days === null && bare?.p_note === '', JSON.stringify(bare))
 
 reset()
 await mountApp('/careers/j-open')
 failNext('storage.upload', { message: 'new row violates row-level security policy' })
-await type('Full name', 'Zara Malik')
+await type('Full name (as per CNIC)', 'Zara Malik')
 await type('Email address', 'zara@example.com')
 await type('Phone number', '0300')
+await type('Current salary', '150000')
 await type('Expected salary', '200000')
 await pickFile(pdf())
 await click(button('Submit application'))
@@ -364,9 +395,11 @@ check('…with each application in its stage',
   column('New')?.textContent?.includes('Zara Malik') && column('Shortlisted')?.textContent?.includes('Hamza Ali') &&
   column('Rejected')?.textContent?.includes('Usman Tariq'))
 const boardSelect = captured.selects.find((x) => x.table === 'job_applications')
-check('the board asks for one job’s applications, never the expected salary',
+check('the board asks for one job’s applications, never the salaries, benefits or HR’s notes',
   JSON.stringify(boardSelect?.filters) === JSON.stringify([['job_opening_id', 'eq', 'j-open']]) &&
-  !['expected_salary', 'current_salary', 'hr_notes'].some((c) => boardSelect?.columns.includes(c)) && !boardSelect?.columns.includes('*'), JSON.stringify(boardSelect))
+  !['expected_salary', 'current_salary', 'current_benefits', 'hr_notes'].some((c) => boardSelect?.columns.includes(c)) &&
+  !boardSelect?.columns.includes('*') &&
+  ['switch_reason', 'notice_period_days'].every((c) => boardSelect?.columns.includes(c)), JSON.stringify(boardSelect))
 
 await openCard('Hamza Ali')
 const d = () => dialog()!
@@ -382,28 +415,54 @@ const timeline = () => dialog()!.querySelector('[aria-label="Timeline"]')?.textC
 check('the timeline shows each move with who made it and the reason, and the application',
   timeline().includes('Moved to Shortlisted') && timeline().includes('Moved to Screened') &&
   timeline().includes('Good CV') && timeline().includes('Bilal Ahmed') && timeline().includes('Applied'), timeline())
-check('the applicant’s note is shown', d().textContent?.includes('Available from July.'))
+const fromApplicant = () => d().querySelector('[aria-label="From the applicant"]')
+check('the applicant’s note is shown under what they told us',
+  fromApplicant()?.querySelector('[aria-label="Notes"]')?.textContent === 'Available from July.' &&
+  !fromApplicant()?.textContent?.includes('Notice period'), fromApplicant()?.textContent)
 
-check('HR gets the current salary and notes to fill in, saved only once changed',
-  !!field('Current salary', d()) && !!field('Notes', d()) && !d().querySelector('[aria-label="Current salary"]') &&
-  (button('Save', d()) as HTMLButtonElement).disabled)
+const hrFields = ['Current salary', 'Current employer benefits', 'Reason for switching', 'Notice period', 'HR notes']
+check('HR can fill in the applicant’s details and keep notes, saved only once changed',
+  hrFields.every((l) => !!field(l, d())) && valueOf('Currency', d()) === 'PKR' &&
+  !d().querySelector('[aria-label="Current salary"]') && (button('Save', d()) as HTMLButtonElement).disabled)
 await type('Current salary', '210000', d())
-await type('Notes', '  Strong React; wants remote.  ', d())
+await choose('Currency', 'USD', d())
+await type('Current employer benefits', ' Fuel allowance ', d())
+await type('Reason for switching', 'Wants remote work.', d())
+await type('Notice period', '400', d())
+await click(button('Save', d()))
+check('a notice period over 365 days isn’t saved',
+  field('Notice period', d())!.querySelector('input')!.validity.rangeOverflow &&
+  !captured.rpcs.some((r) => r.name === 'application_set_hr_details'))
+await type('Notice period', '45', d())
+await type('HR notes', '  Strong React; wants remote.  ', d())
+const boardLoads = () => captured.selects.filter((x) => x.table === 'job_applications').length
+const loadsBefore = boardLoads()
 await click(button('Save', d()))
 check('…which go through application_set_hr_details, trimmed',
   JSON.stringify(captured.rpcs.find((r) => r.name === 'application_set_hr_details')?.args) ===
-    JSON.stringify({ p_application_id: 'a-short', p_current_salary: 210000, p_hr_notes: 'Strong React; wants remote.' }),
+    JSON.stringify({
+      p_application_id: 'a-short', p_current_salary: 210000, p_current_salary_currency: 'USD',
+      p_current_benefits: 'Fuel allowance', p_switch_reason: 'Wants remote work.', p_notice_period_days: 45,
+      p_hr_notes: 'Strong React; wants remote.',
+    }),
   JSON.stringify(captured.rpcs.filter((r) => r.name === 'application_set_hr_details')))
-check('…then the current salary shows before the expected one',
-  await waitFor(() => d().querySelector('[aria-label="Current salary"]')?.textContent === 'PKR 210,000') &&
+const textArea = (l: string) => field(l, d())?.querySelector('textarea')?.value
+check('…then the board reloads, and the form keeps what was saved',
+  await waitFor(() => boardLoads() > loadsBefore) && textArea('Reason for switching') === 'Wants remote work.' &&
+  valueOf('Notice period', d()) === '45' && textArea('Current employer benefits') === 'Fuel allowance' &&
+  (button('Save', d()) as HTMLButtonElement).disabled)
+check('…then the current salary shows in its currency, before the expected one',
+  await waitFor(() => d().querySelector('[aria-label="Current salary"]')?.textContent === 'USD 210,000') &&
   d().textContent!.indexOf('/ month current') < d().textContent!.indexOf('/ month expected'))
 check('…and Save is idle again', (button('Save', d()) as HTMLButtonElement).disabled)
-await type('Current salary', '', d())
-await type('Notes', '', d())
+for (const l of hrFields) await type(l, '', d())
 await click(button('Save', d()))
-check('emptying both clears them',
+check('emptying them clears them',
   JSON.stringify(captured.rpcs.filter((r) => r.name === 'application_set_hr_details').at(-1)?.args) ===
-    JSON.stringify({ p_application_id: 'a-short', p_current_salary: null, p_hr_notes: null }))
+    JSON.stringify({
+      p_application_id: 'a-short', p_current_salary: null, p_current_salary_currency: 'USD', p_current_benefits: null,
+      p_switch_reason: null, p_notice_period_days: null, p_hr_notes: null,
+    }))
 
 const openMoveTo = async () => {
   dialog()!.querySelector('[role="combobox"]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
@@ -458,10 +517,14 @@ check('an interviewer sees only shortlisted through cleared', columnLabels().joi
   'Shortlisted,Test,Interview 1,Interview 2,Interview 3,Cleared', columnLabels().join())
 await openCard('Ayesha Noor')
 await waitFor(() => captured.rpcs.some((r) => r.name === 'application_hr_details'))
-check('an interviewer doesn’t see the salaries or HR’s notes',
+check('an interviewer doesn’t see the salaries, the current benefits or HR’s notes',
   !dialog()?.querySelector('[aria-label="Expected salary"]') && !dialog()?.querySelector('[aria-label="Current salary"]') &&
   !dialog()?.textContent?.includes('300,000') && !dialog()?.textContent?.includes('260,000') &&
-  !dialog()?.textContent?.includes('HR notes') && !dialog()?.textContent?.includes('Notice period of one month.'))
+  !dialog()?.textContent?.includes('HR notes') && !dialog()?.textContent?.includes('Strong portfolio.') &&
+  !dialog()?.textContent?.includes('Health cover for family.'))
+check('…but does see the notice period and reason for switching',
+  dialog()?.querySelector('[aria-label="Notice period"]')?.textContent === '30 days' &&
+  dialog()?.querySelector('[aria-label="Reason for switching"]')?.textContent === 'Wants product work.')
 check('…can’t undo', !buttons('Undo: back to Test', dialog()!).length && !dialog()?.textContent?.includes('Undo'))
 const testFiles = () => document.querySelector<HTMLElement>('[aria-label="Test files"]')
 check('an interviewer sees the submitted test, through a signed link',
@@ -630,8 +693,10 @@ check('the hiring manager sees the expected salary',
   await waitFor(() => dialog()?.querySelector('[aria-label="Expected salary"]')?.textContent === 'PKR 300,000'))
 check('…and the current salary and HR’s notes, read-only',
   dialog()?.querySelector('[aria-label="Current salary"]')?.textContent === 'PKR 260,000' &&
-  dialog()?.querySelector('[aria-label="HR notes"]')?.textContent === 'Notice period of one month.' &&
-  !field('Notes', dialog()!) && !field('Current salary', dialog()!) && !button('Save', dialog()!))
+  dialog()?.querySelector('[aria-label="HR notes"]')?.textContent === 'Strong portfolio.' &&
+  !field('HR notes', dialog()!) && !field('Current salary', dialog()!) && !button('Save', dialog()!))
+check('…and the current employer’s benefits',
+  dialog()?.querySelector('[aria-label="Current employer benefits"]')?.textContent === 'Health cover for family.')
 check('the hiring manager can attach the submitted test, at any stage they see',
   !!button('Attach test', dialog()!.querySelector<HTMLElement>('[aria-label="Test files"]')!))
 await pickFile(pdf('take-home.pdf'))

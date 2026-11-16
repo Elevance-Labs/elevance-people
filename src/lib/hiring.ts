@@ -53,7 +53,8 @@ export function jobOpeningError(error: { code?: string; message: string }) {
 // For the public form, whose visitors can't do anything with a constraint name.
 export function applicationError(error: { code?: string; message: string }) {
   if (error.code === '23505') return 'You’ve already applied for this job with this email address.'
-  if (error.code === '23514') return 'Please check your details: name, a valid email address, a phone number and your expected salary.'
+  if (error.code === '23514')
+    return 'Please check your details: name, a valid email address, a phone number, your current and expected salary, and a notice period of up to 365 days.'
   return error.message
 }
 
@@ -220,9 +221,17 @@ export async function removeTestFile(id: string) {
   return null
 }
 
-// Every column but the salaries and HR's notes, which clients can't select.
+// An applicant's notice period, in days (mirror of the check constraint).
+export const MAX_NOTICE_DAYS = 365
+
+// Every column but the salaries, the current benefits and HR's notes, which
+// clients can't select.
 export const APPLICATION_COLUMNS =
-  'id, job_opening_id, full_name, email, phone, note, resume_path, resume_name, created_at, stage, stage_changed_at'
+  'id, job_opening_id, full_name, email, phone, note, resume_path, resume_name, created_at, stage, stage_changed_at, ' +
+  'switch_reason, notice_period_days'
 // Those, from application_hr_details (HR and the job's hiring manager).
-export type ApplicationHrDetails = Pick<JobApplication, 'current_salary' | 'expected_salary' | 'hr_notes'>
+export type ApplicationHrDetails = Pick<
+  JobApplication,
+  'current_salary' | 'current_salary_currency' | 'expected_salary' | 'current_benefits' | 'hr_notes'
+>
 export type BoardApplication = Omit<JobApplication, keyof ApplicationHrDetails>

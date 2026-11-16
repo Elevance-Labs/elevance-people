@@ -375,10 +375,20 @@ create table public.job_applications (
   -- Changed only by application_move / application_undo.
   stage            public.application_stage not null default 'new',
   stage_changed_at timestamptz not null default now(),
-  -- HR's: monthly, in PKR, and their notes. Set only by
-  -- application_set_hr_details; hidden like expected_salary.
+  -- Monthly, in its currency: the applicant's (required by
+  -- submit_application), which HR can correct with
+  -- application_set_hr_details; null only on applications sent before it
+  -- was asked for and HR left blank. Hidden like expected_salary.
   current_salary integer check (current_salary >= 0),
-  hr_notes       text check (length(hr_notes) <= 5000)
+  -- HR's notes. Set only by application_set_hr_details; hidden too.
+  hr_notes       text check (length(hr_notes) <= 5000),
+  current_salary_currency text not null default 'PKR'
+                 check (current_salary_currency in ('PKR', 'USD')),
+  -- The applicant's, all optional; HR can fill them in or correct them with
+  -- application_set_hr_details. The benefits are hidden like the salaries.
+  current_benefits   text check (length(current_benefits) <= 2000),
+  switch_reason      text check (length(switch_reason) <= 2000),
+  notice_period_days smallint check (notice_period_days between 0 and 365)
 );
 create unique index job_applications_email_key on public.job_applications (job_opening_id, email);
 create index job_applications_job_stage_idx on public.job_applications (job_opening_id, stage);
@@ -1944,12 +1954,17 @@ $$;
 -- Apply for an open job. The CV must already be uploaded into that job's
 -- folder (the storage policy only allows that for a job taking applications).
 create function public.submit_application(
-  p_job_opening_id uuid, p_full_name text, p_email text, p_phone text, p_expected_salary integer,
+  p_job_opening_id uuid, p_full_name text, p_email text, p_phone text,
+  p_current_salary integer, p_current_salary_currency text, p_expected_salary integer,
+  p_current_benefits text, p_switch_reason text, p_notice_period_days integer,
   p_note text, p_resume_path text, p_resume_name text)
 returns void language plpgsql security definer set search_path = '' as $$
 begin
   if not public.job_accepts_applications(p_job_opening_id::text) then
     raise exception 'This job is no longer taking applications.' using errcode = 'P0002';
+  end if;
+  if p_current_salary is null or p_current_salary_currency is null then
+    raise exception 'Enter your current salary.' using errcode = '23514';
   end if;
   if p_expected_salary is null then
     raise exception 'Enter your expected salary.' using errcode = '23514';
@@ -1961,8 +1976,11 @@ begin
   end if;
 
   insert into public.job_applications
-    (job_opening_id, full_name, email, phone, expected_salary, note, resume_path, resume_name)
-  values (p_job_opening_id, trim(p_full_name), lower(trim(p_email)), trim(p_phone), p_expected_salary,
+    (job_opening_id, full_name, email, phone, current_salary, current_salary_currency, expected_salary,
+     current_benefits, switch_reason, notice_period_days, note, resume_path, resume_name)
+  values (p_job_opening_id, trim(p_full_name), lower(trim(p_email)), trim(p_phone),
+          p_current_salary, p_current_salary_currency, p_expected_salary,
+          nullif(trim(p_current_benefits), ''), nullif(trim(p_switch_reason), ''), p_notice_period_days,
           nullif(trim(p_note), ''), p_resume_path, trim(p_resume_name));
 end;
 $$;
@@ -1971,8 +1989,9 @@ $$;
 -- Application stages. HR sees and moves every application. A job's hiring
 -- manager and interviewers (its hiring team) see its applications from
 -- shortlisted through cleared, and move them out of shortlisted, test and
--- the interviews. Only HR and the hiring manager see the salaries and HR's
--- notes; only HR writes the current salary and the notes.
+-- the interviews. Only HR and the hiring manager see the salaries, the
+-- current benefits and HR's notes; only HR fills in or corrects what the
+-- applicant gave (but the expected salary) and writes the notes.
 -- ---------------------------------------------------------------------------
 
 -- Where an application may go next. Mirrored in src/lib/hiring.ts.
@@ -2058,12 +2077,14 @@ returns integer language sql stable set search_path = '' as $$
   select count(*)::integer from public.job_applications a where a.job_opening_id = p_job.id;
 $$;
 
--- Current and expected salary and HR's notes, for HR and the job's hiring
--- manager. No row for anyone else.
+-- Current salary (with its currency), expected salary, the current
+-- employer's benefits and HR's notes, for HR and the job's hiring manager.
+-- No row for anyone else.
 create function public.application_hr_details(p_application_id uuid)
-returns table (current_salary integer, expected_salary integer, hr_notes text)
+returns table (current_salary integer, current_salary_currency text, expected_salary integer,
+               current_benefits text, hr_notes text)
 language sql stable security definer set search_path = '' as $$
-  select a.current_salary, a.expected_salary, a.hr_notes
+  select a.current_salary, a.current_salary_currency, a.expected_salary, a.current_benefits, a.hr_notes
     from public.job_applications a
     join public.job_openings j on j.id = a.job_opening_id
    where a.id = p_application_id
@@ -2071,16 +2092,24 @@ language sql stable security definer set search_path = '' as $$
      and (public.is_hr() or j.manager_id = public.current_employee_id());
 $$;
 
--- HR sets an application's current salary and notes (empty notes clear them).
+-- HR fills in or corrects what the applicant gave (current salary and its
+-- currency, current benefits, reason for switching, notice period) and sets
+-- their notes. Empty text clears; no currency keeps the one there.
 create function public.application_set_hr_details(
-  p_application_id uuid, p_current_salary integer, p_hr_notes text)
+  p_application_id uuid, p_current_salary integer, p_current_salary_currency text,
+  p_current_benefits text, p_switch_reason text, p_notice_period_days integer, p_hr_notes text)
 returns void language plpgsql security definer set search_path = '' as $$
 begin
   if not public.is_hr() then
     raise exception 'Only HR can change these details.' using errcode = '42501';
   end if;
   update public.job_applications
-     set current_salary = p_current_salary, hr_notes = nullif(trim(p_hr_notes), '')
+     set current_salary = p_current_salary,
+         current_salary_currency = coalesce(p_current_salary_currency, current_salary_currency),
+         current_benefits = nullif(trim(p_current_benefits), ''),
+         switch_reason = nullif(trim(p_switch_reason), ''),
+         notice_period_days = p_notice_period_days,
+         hr_notes = nullif(trim(p_hr_notes), '')
    where id = p_application_id;
   if not found then
     raise exception 'Application not found.' using errcode = 'P0002';
@@ -4105,10 +4134,10 @@ grant insert (title, department_id, designation_id, status, due_date, descriptio
   on public.job_openings to authenticated;
 grant select, insert, delete on public.job_opening_interviewers to authenticated;
 -- Applications are only ever written by submit_application and the stage
--- functions. Every column but the salaries and HR's notes (see
--- application_hr_details).
+-- functions. Every column but the salaries, the current benefits and HR's
+-- notes (see application_hr_details).
 grant select (id, job_opening_id, full_name, email, phone, note, resume_path, resume_name,
-              created_at, stage, stage_changed_at)
+              created_at, stage, stage_changed_at, switch_reason, notice_period_days)
   on public.job_applications to authenticated;
 grant select on public.application_stage_events to authenticated;
 -- Test files change only through application_add_test_file / _remove_test_file.
@@ -4217,7 +4246,7 @@ revoke execute on function
   public.leave_balances(uuid, integer), public.valid_perks(jsonb), public.job_openings_stamp(),
   public.valid_interview_questions(text[]),
   public.job_accepts_applications(text), public.job_posting(uuid), public.public_branding(),
-  public.submit_application(uuid, text, text, text, integer, text, text, text),
+  public.submit_application(uuid, text, text, text, integer, text, integer, text, text, integer, text, text, text),
   public.announcements_stamp(),
   public.application_next_stages(public.application_stage),
   public.application_stage_needs_reason(public.application_stage),
@@ -4225,7 +4254,7 @@ revoke execute on function
   public.application_team_movable(public.application_stage),
   public.is_hiring_team(uuid), public.on_hiring_team(),
   public.can_see_application(uuid, public.application_stage), public.application_hr_details(uuid),
-  public.application_set_hr_details(uuid, integer, text),
+  public.application_set_hr_details(uuid, integer, text, text, text, integer, text),
   public.application_move(uuid, public.application_stage, text, smallint, smallint[]),
   public.can_attach_test_files(text), public.application_passed_test(uuid),
   public.application_add_test_file(uuid, text, text), public.application_remove_test_file(uuid),
@@ -4279,7 +4308,7 @@ grant execute on function
   public.application_team_movable(public.application_stage),
   public.is_hiring_team(uuid), public.on_hiring_team(),
   public.can_see_application(uuid, public.application_stage), public.application_hr_details(uuid),
-  public.application_set_hr_details(uuid, integer, text),
+  public.application_set_hr_details(uuid, integer, text, text, text, integer, text),
   public.application_move(uuid, public.application_stage, text, smallint, smallint[]),
   public.can_attach_test_files(text), public.application_passed_test(uuid),
   public.application_add_test_file(uuid, text, text), public.application_remove_test_file(uuid),
@@ -4318,7 +4347,7 @@ grant execute on function public.my_payslips() to authenticated;
 -- The public job page, for people who aren't signed in.
 grant execute on function
   public.job_accepts_applications(text), public.job_posting(uuid), public.public_branding(),
-  public.submit_application(uuid, text, text, text, integer, text, text, text)
+  public.submit_application(uuid, text, text, text, integer, text, integer, text, text, integer, text, text, text)
   to anon, authenticated;
 
 grant usage on schema public to supabase_auth_admin;

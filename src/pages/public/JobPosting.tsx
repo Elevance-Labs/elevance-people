@@ -11,6 +11,7 @@ import {
   CssBaseline,
   Grid,
   InputAdornment,
+  MenuItem,
   Paper,
   Stack,
   TextField,
@@ -24,12 +25,22 @@ import WorkOutlineIcon from '@mui/icons-material/WorkOutlined'
 import { Logo } from '../../components/common'
 import { RichTextView } from '../../components/RichTextView'
 import { APPLICATIONS_BUCKET, supabase } from '../../lib/supabase'
-import { COMPANY_NAME, CV_MAX_BYTES, formatDate } from '../../lib/constants'
-import { applicationError, logoUrl } from '../../lib/hiring'
+import { COMPANY_NAME, CV_MAX_BYTES, formatDate, SALARY_CURRENCIES } from '../../lib/constants'
+import { applicationError, logoUrl, MAX_NOTICE_DAYS } from '../../lib/hiring'
 import { brandedTheme, DEFAULT_PRIMARY } from '../../theme'
-import type { Branding, JobPosting as Posting } from '../../lib/types'
+import type { Branding, JobPosting as Posting, SalaryCurrency } from '../../lib/types'
 
-const EMPTY = { full_name: '', email: '', phone: '', expected_salary: '', note: '' }
+const EMPTY = {
+  full_name: '',
+  email: '',
+  phone: '',
+  current_salary: '',
+  expected_salary: '',
+  current_benefits: '',
+  switch_reason: '',
+  notice_period_days: '',
+  note: '',
+}
 
 // Public: reached without signing in (see App.tsx). It reads only through
 // the job_posting and public_branding functions, and applies through
@@ -182,6 +193,7 @@ function Perks({ perks }: { perks: Branding['perks'] }) {
 
 function ApplyForm({ job }: { job: Posting }) {
   const [form, setForm] = useState(EMPTY)
+  const [currency, setCurrency] = useState<SalaryCurrency>('PKR')
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -205,8 +217,14 @@ function ApplyForm({ job }: { job: Posting }) {
 
   async function submit(e: FormEvent) {
     e.preventDefault()
+    const current = form.current_salary.trim()
+    if (!/^\d+$/.test(current)) return setError('Enter your current salary as a whole number.')
     const salary = form.expected_salary.trim()
     if (!/^\d+$/.test(salary)) return setError('Enter your expected salary as a whole number of rupees.')
+    const notice = form.notice_period_days.trim()
+    if (notice && (!/^\d+$/.test(notice) || Number(notice) > MAX_NOTICE_DAYS)) {
+      return setError(`Enter your notice period as a whole number of days, up to ${MAX_NOTICE_DAYS}.`)
+    }
     if (!file) return setError('Attach your CV as a PDF.')
     setBusy(true)
     setError(null)
@@ -224,7 +242,12 @@ function ApplyForm({ job }: { job: Posting }) {
       p_full_name: form.full_name,
       p_email: form.email,
       p_phone: form.phone,
+      p_current_salary: Number(current),
+      p_current_salary_currency: currency,
       p_expected_salary: Number(salary),
+      p_current_benefits: form.current_benefits,
+      p_switch_reason: form.switch_reason,
+      p_notice_period_days: notice ? Number(notice) : null,
       p_note: form.note,
       p_resume_path: path,
       p_resume_name: file.name,
@@ -263,9 +286,32 @@ function ApplyForm({ job }: { job: Posting }) {
           </Alert>
         ) : (
           <Stack component="form" spacing={2} sx={{ mt: 2 }} onSubmit={submit}>
-            <TextField label="Full name" required autoComplete="name" {...field('full_name')} />
+            <TextField label="Full name (as per CNIC)" required autoComplete="name" {...field('full_name')} />
             <TextField label="Email address" required type="email" autoComplete="email" {...field('email')} />
             <TextField label="Phone number" required type="tel" autoComplete="tel" {...field('phone')} />
+            <Stack direction="row" spacing={1.5}>
+              <TextField
+                select
+                label="Currency"
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value as SalaryCurrency)}
+                sx={{ width: 104, flexShrink: 0 }}
+              >
+                {SALARY_CURRENCIES.map((c) => (
+                  <MenuItem key={c} value={c}>
+                    {c}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                label="Current salary"
+                required
+                type="number"
+                helperText="Per month"
+                slotProps={{ htmlInput: { min: 0, step: 1, inputMode: 'numeric' } }}
+                {...field('current_salary')}
+              />
+            </Stack>
             <TextField
               label="Expected salary"
               required
@@ -301,10 +347,36 @@ function ApplyForm({ job }: { job: Posting }) {
               </Typography>
             </Box>
             <TextField
-              label="Note"
+              label="Current employer benefits"
+              multiline
+              minRows={2}
+              placeholder="Health cover, bonuses, allowances… (optional)"
+              slotProps={{ htmlInput: { maxLength: 2000 } }}
+              {...field('current_benefits')}
+            />
+            <TextField
+              label="Reason for switching"
+              multiline
+              minRows={2}
+              placeholder="Optional"
+              slotProps={{ htmlInput: { maxLength: 2000 } }}
+              {...field('switch_reason')}
+            />
+            <TextField
+              label="Notice period"
+              type="number"
+              placeholder="Optional"
+              slotProps={{
+                input: { endAdornment: <InputAdornment position="end">days</InputAdornment> },
+                htmlInput: { min: 0, max: MAX_NOTICE_DAYS, step: 1, inputMode: 'numeric' },
+              }}
+              {...field('notice_period_days')}
+            />
+            <TextField
+              label="Notes"
               multiline
               minRows={3}
-              placeholder="Anything you’d like us to know (optional)"
+              placeholder="Anything else you’d like us to know (optional)"
               slotProps={{ htmlInput: { maxLength: 5000 } }}
               {...field('note')}
             />
