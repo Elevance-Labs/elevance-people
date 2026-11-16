@@ -354,7 +354,8 @@ create table public.job_opening_interviewers (
 );
 create index job_opening_interviewers_employee_idx on public.job_opening_interviewers (employee_id);
 
--- One per person per job (by email). Written only by submit_application.
+-- One per person per job (by email). Written only by submit_application
+-- (the public page) and application_add (HR, for one received elsewhere).
 create table public.job_applications (
   id             uuid primary key default gen_random_uuid(),
   job_opening_id uuid not null references public.job_openings (id) on delete restrict,
@@ -388,7 +389,10 @@ create table public.job_applications (
   -- application_set_hr_details. The benefits are hidden like the salaries.
   current_benefits   text check (length(current_benefits) <= 2000),
   switch_reason      text check (length(switch_reason) <= 2000),
-  notice_period_days smallint check (notice_period_days between 0 and 365)
+  notice_period_days smallint check (notice_period_days between 0 and 365),
+  -- Who in HR added it (application_add); null when applied through the
+  -- public page.
+  added_by uuid references public.employees (id) on delete set null
 );
 create unique index job_applications_email_key on public.job_applications (job_opening_id, email);
 create index job_applications_job_stage_idx on public.job_applications (job_opening_id, stage);
@@ -1814,8 +1818,10 @@ create trigger reimbursements_touch before update on public.reimbursements
 -- ---------------------------------------------------------------------------
 
 -- Approve or reject a pending leave, as HR and/or the employee's manager
--- (both at once when one person is both). Nobody decides their own leave.
--- leaves_guard turns the leave approved once every approval is in.
+-- (both at once when one person is both). Nobody decides their own leave,
+-- except that a company admin may approve theirs: as HR and as manager at
+-- once, which grants it. leaves_guard turns the leave approved once every
+-- approval is in.
 create function public.leave_decide(p_leave_id uuid, p_approve boolean, p_reason text default null)
 returns public.leaves language plpgsql security definer set search_path = '' as $$
 declare
@@ -1833,7 +1839,10 @@ begin
     raise exception 'Leave not found.' using errcode = 'P0002';
   end if;
   if v_leave.employee_id = v_me then
-    raise exception 'You cannot approve or reject your own leave.' using errcode = '42501';
+    if not (p_approve and public.is_company_admin()) then
+      raise exception 'You cannot approve or reject your own leave.' using errcode = '42501';
+    end if;
+    v_as_manager := true;
   end if;
   if v_leave.status <> 'pending' then
     raise exception 'This leave is already %.', v_leave.status;
@@ -2249,6 +2258,55 @@ begin
      test_score, interview_questions, interview_ratings)
   values (p_application_id, 'move', v_app.stage, p_stage, v_reason, v_me,
           p_test_score, case when p_ratings is not null then v_questions end, p_ratings);
+end;
+$$;
+
+-- HR adds an application received elsewhere, for an open job, into one of
+-- the early stages. The CV must already be uploaded into that job's folder.
+-- Returns the new application's id.
+create function public.application_add(
+  p_job_opening_id uuid, p_stage public.application_stage, p_reason text,
+  p_full_name text, p_email text, p_phone text,
+  p_current_salary integer, p_current_salary_currency text, p_expected_salary integer,
+  p_current_benefits text, p_switch_reason text, p_notice_period_days integer,
+  p_note text, p_resume_path text, p_resume_name text)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare
+  v_me     uuid := public.current_employee_id();
+  v_reason text := nullif(trim(p_reason), '');
+  v_id     uuid;
+begin
+  if v_me is null or not public.is_hr() then
+    raise exception 'Only HR can add applications.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.job_openings j where j.id = p_job_opening_id and j.status = 'open') then
+    raise exception 'Applications can only be added to an open job.' using errcode = 'P0002';
+  end if;
+  if p_stage is null or p_stage not in ('screened', 'shortlisted', 'test', 'interview_1') then
+    raise exception 'An added application starts at Screened, Shortlisted, Test or Interview 1.' using errcode = '23514';
+  end if;
+  if public.application_stage_needs_reason(p_stage) and v_reason is null then
+    raise exception 'Give remarks for adding this application at %.', p_stage using errcode = '23514';
+  end if;
+  if split_part(p_resume_path, '/', 1) <> p_job_opening_id::text
+     or not exists (select 1 from storage.objects o
+                     where o.bucket_id = 'job-applications' and o.name = p_resume_path) then
+    raise exception 'Upload the CV before adding the application.';
+  end if;
+
+  insert into public.job_applications
+    (job_opening_id, full_name, email, phone, current_salary, current_salary_currency, expected_salary,
+     current_benefits, switch_reason, notice_period_days, note, resume_path, resume_name,
+     stage, added_by)
+  values (p_job_opening_id, trim(p_full_name), lower(trim(p_email)), trim(p_phone),
+          p_current_salary, coalesce(p_current_salary_currency, 'PKR'), p_expected_salary,
+          nullif(trim(p_current_benefits), ''), nullif(trim(p_switch_reason), ''), p_notice_period_days,
+          nullif(trim(p_note), ''), p_resume_path, trim(p_resume_name),
+          p_stage, v_me)
+  returning id into v_id;
+  insert into public.application_stage_events (application_id, kind, from_stage, to_stage, reason, created_by)
+  values (v_id, 'move', 'new', p_stage, v_reason, v_me);
+  return v_id;
 end;
 $$;
 
@@ -4133,11 +4191,11 @@ grant insert (title, department_id, designation_id, status, due_date, descriptio
               interview_questions)
   on public.job_openings to authenticated;
 grant select, insert, delete on public.job_opening_interviewers to authenticated;
--- Applications are only ever written by submit_application and the stage
--- functions. Every column but the salaries, the current benefits and HR's
+-- Applications are only ever written by submit_application, application_add
+-- and the stage functions. Every column but the salaries, the current benefits and HR's
 -- notes (see application_hr_details).
 grant select (id, job_opening_id, full_name, email, phone, note, resume_path, resume_name,
-              created_at, stage, stage_changed_at, switch_reason, notice_period_days)
+              created_at, stage, stage_changed_at, switch_reason, notice_period_days, added_by)
   on public.job_applications to authenticated;
 grant select on public.application_stage_events to authenticated;
 -- Test files change only through application_add_test_file / _remove_test_file.
@@ -4256,6 +4314,8 @@ revoke execute on function
   public.can_see_application(uuid, public.application_stage), public.application_hr_details(uuid),
   public.application_set_hr_details(uuid, integer, text, text, text, integer, text),
   public.application_move(uuid, public.application_stage, text, smallint, smallint[]),
+  public.application_add(uuid, public.application_stage, text, text, text, text, integer, text, integer,
+                         text, text, integer, text, text, text),
   public.can_attach_test_files(text), public.application_passed_test(uuid),
   public.application_add_test_file(uuid, text, text), public.application_remove_test_file(uuid),
   public.application_undo(uuid, text), public.application_count(public.job_openings),
@@ -4310,6 +4370,8 @@ grant execute on function
   public.can_see_application(uuid, public.application_stage), public.application_hr_details(uuid),
   public.application_set_hr_details(uuid, integer, text, text, text, integer, text),
   public.application_move(uuid, public.application_stage, text, smallint, smallint[]),
+  public.application_add(uuid, public.application_stage, text, text, text, text, integer, text, integer,
+                         text, text, integer, text, text, text),
   public.can_attach_test_files(text), public.application_passed_test(uuid),
   public.application_add_test_file(uuid, text, text), public.application_remove_test_file(uuid),
   public.application_undo(uuid, text), public.application_count(public.job_openings),
@@ -4848,6 +4910,17 @@ create policy job_application_cvs_upload on storage.objects for insert to anon, 
 create policy job_application_cvs_read on storage.objects for select to authenticated
   using (bucket_id = 'job-applications'
          and exists (select 1 from public.job_applications a where a.resume_path = objects.name));
+-- HR uploads a CV into an open job's folder, due date or not (application_add),
+-- and removes one no application points at.
+create policy job_application_cvs_hr_upload on storage.objects for insert to authenticated
+  with check (bucket_id = 'job-applications'
+              and (select public.is_hr())
+              and exists (select 1 from public.job_openings j
+                           where j.id::text = (storage.foldername(name))[1] and j.status = 'open'));
+create policy job_application_cvs_hr_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'job-applications'
+         and (select public.is_hr())
+         and not exists (select 1 from public.job_applications a where a.resume_path = objects.name));
 
 -- Submitted tests (private, <application_id>/<uuid>.<ext>, 5 MB, PDFs and
 -- images): HR and the hiring manager upload into the application's folder;

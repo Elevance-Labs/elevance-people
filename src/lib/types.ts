@@ -244,6 +244,8 @@ export interface JobApplication {
   resume_path: string
   resume_name: string
   created_at: string
+  // Who in HR added it (application_add); null when applied on the public page.
+  added_by: string | null
 }
 
 export interface ApplicationStageEvent {

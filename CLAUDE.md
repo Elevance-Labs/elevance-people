@@ -54,7 +54,8 @@ behaviour).
   convenience, never the only guard.
 - **Some state changes only through RPCs.** A leave's status and approvals are
   not client-writable; `leave_decide` / `leave_cancel` are the only way in.
-  Job applications are written only by `submit_application` (HR's current
+  Job applications are written only by `submit_application` and, by HR for
+  an open job at an early stage, `application_add` (HR's current
   salary and notes by `application_set_hr_details`); their stage
   moves only through `application_move` / `application_undo`, and to hired
   only through `application_hire`; the test score and interview ratings
@@ -227,7 +228,8 @@ behaviour).
 - `/jobs`, `/jobs/new`, `/jobs/:id` — HR: job openings; the form (with the
   rich text editor) is lazy-loaded.
 - `/applications` — HR and hiring teams: one job's board (`?job=` required,
-  defaults to the first), open application in `?application=`.
+  defaults to the first), open application in `?application=`; HR also
+  *Add application* (`AddApplicationDialog`) for a CV received elsewhere.
 - `/hr/onboarding` — HR and managers (RLS: their reports'): onboardings by
   status (`?status=`, in progress by default). `/hr/onboarding/:id` — one
   onboarding's checklist; tick (managers: their own department's tasks),
@@ -415,7 +417,9 @@ Full detail in `supabase/schema.sql`.
   self-edits; flips `pending` → `approved` once HR and the org-chart manager
   (if any) have approved. Visible to the employee, their manager
   (`is_manager_of`) and HR. Clients insert and HR updates dates only; status
-  moves via `leave_decide` (approve/reject) and `leave_cancel`.
+  moves via `leave_decide` (approve/reject; never one's own, except a
+  company admin approving theirs, as HR and manager at once) and
+  `leave_cancel`.
   `leave_balances` returns quota/approved/pending per type for one person-year.
 - `departments` → `designations` → `kpis` and `expectations` — company
   config; everyone reads, company admins write departments and designations,
@@ -428,7 +432,9 @@ Full detail in `supabase/schema.sql`.
   until `due_date`. `created_by` stamped by trigger. Its interview
   questions (1–10, five defaults) are what each interview rates.
 - `job_applications` — written only by `submit_application` (security
-  definer, callable by anon): the applicant gives current salary (PKR or
+  definer, callable by anon) and `application_add` (HR: an open job, due
+  date or not, into screened / shortlisted / test / interview 1, with a
+  move from new in the timeline; `added_by` stamped): the applicant gives current salary (PKR or
   USD) and expected salary, and optionally current benefits, reason for
   switching, notice period and a note. HR fills in or corrects all but the
   expected salary and the note, and writes notes, only by
@@ -446,7 +452,8 @@ Full detail in `supabase/schema.sql`.
   abandoned. The app's percentages (`hiring.ts`) leave out the test and
   undone moves. CV in the private
   `job-applications` bucket at `<job_opening_id>/…`, where the storage policy
-  only lets anyone upload while that job takes applications, and reads follow
+  only lets anyone upload while that job takes applications (HR: while it
+  is open; HR also removes a CV no application points at), and reads follow
   who can see the application. A job with
   applications can't be deleted.
 - `application_test_files` — the submitted test (1–3 files, needed by

@@ -39,6 +39,13 @@ export function leaveDays(start: string, end: string, halfDay: boolean, holidays
   return halfDay ? days / 2 : days
 }
 
+// Every day between the dates, weekends and holidays included (a half day
+// is still one). Counted in UTC so a daylight-saving change can't skew it.
+export function calendarDays(start: string, end: string) {
+  const utc = (d: string) => Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)))
+  return Math.round((utc(end) - utc(start)) / 86_400_000) + 1
+}
+
 // Days still free in a balance; null when the type has no limit.
 export const remainingOf = (b: LeaveBalance) =>
   b.quota === null ? null : Math.max(b.quota - b.approved - b.pending, 0)

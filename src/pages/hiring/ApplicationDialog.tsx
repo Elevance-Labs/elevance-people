@@ -453,7 +453,9 @@ export default function ApplicationDialog({
               </Fact>
             )}
             <Fact icon={<WorkOutlineIcon fontSize="small" />}>{jobTitle}</Fact>
-            <Fact icon={<EventOutlinedIcon fontSize="small" />}>Applied {formatDay(a.created_at)}</Fact>
+            <Fact icon={<EventOutlinedIcon fontSize="small" />}>
+              {a.added_by ? 'Added' : 'Applied'} {formatDay(a.created_at)}
+            </Fact>
           </Stack>
         </Box>
         <IconButton aria-label="Close" onClick={onClose} edge="end">
@@ -960,9 +962,10 @@ export default function ApplicationDialog({
             ))}
             <Box component="li" sx={{ borderLeft: 2, borderColor: 'divider', pl: 1.5 }}>
               <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                Applied
+                {a.added_by ? 'Added by HR' : 'Applied'}
               </Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                {a.added_by && `${nameOf(a.added_by)} · `}
                 {formatDayTime(a.created_at)}
               </Typography>
             </Box>

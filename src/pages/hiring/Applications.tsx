@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Box,
+  Button,
   ButtonBase,
   Chip,
   LinearProgress,
@@ -13,12 +14,14 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import AddIcon from '@mui/icons-material/Add'
 import { useAuth } from '../../auth/AuthProvider'
 import { PageHeader, PersonAvatar } from '../../components/common'
 import { supabase } from '../../lib/supabase'
 import { JOB_STATUS_LABELS, STAGE_LABELS, formatDay } from '../../lib/constants'
 import { APPLICATION_COLUMNS, STAGES, TEAM_STAGES, type BoardApplication } from '../../lib/hiring'
 import type { ApplicationStage, DirectoryEntry, JobOpeningStatus } from '../../lib/types'
+import AddApplicationDialog from './AddApplicationDialog'
 import ApplicationDialog from './ApplicationDialog'
 
 type Job = {
@@ -55,6 +58,7 @@ export default function Applications() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
 
   const setQuery = useCallback(
     (job: string, application: string | null) =>
@@ -117,6 +121,16 @@ export default function Applications() {
   }
 
   const job = jobs?.find((j) => j.id === jobId)
+  // HR adds applications received elsewhere, to open jobs only.
+  const openJobs = jobs?.filter((j) => j.status === 'open') ?? []
+
+  // Show the job it was added to, with the new application open.
+  async function added(job: string, id: string, stage: ApplicationStage, name: string) {
+    setAdding(false)
+    if (job === jobId) await load(jobId)
+    setQuery(job, id)
+    setNotice(`Added ${name} to ${STAGE_LABELS[stage]}`)
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: PAGE_HEIGHT, minHeight: 420 }}>
@@ -129,25 +143,37 @@ export default function Applications() {
         }
         actions={
           !!jobs?.length && (
-            <TextField
-              select
-              label="Job"
-              required
-              value={job ? jobId : ''}
-              onChange={(e) => setQuery(e.target.value, null)}
-              sx={{ minWidth: 280 }}
-            >
-              {jobs.map((j) => (
-                <MenuItem key={j.id} value={j.id}>
-                  {j.title}
-                  {j.status !== 'open' && (
-                    <Typography component="span" variant="body2" sx={{ color: 'text.secondary', whiteSpace: 'pre' }}>
-                      {` · ${JOB_STATUS_LABELS[j.status]}`}
-                    </Typography>
-                  )}
-                </MenuItem>
-              ))}
-            </TextField>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1.5 }}>
+              {isHr && (
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  disabled={!openJobs.length}
+                  onClick={() => setAdding(true)}
+                >
+                  Add application
+                </Button>
+              )}
+              <TextField
+                select
+                label="Job"
+                required
+                value={job ? jobId : ''}
+                onChange={(e) => setQuery(e.target.value, null)}
+                sx={{ minWidth: 280 }}
+              >
+                {jobs.map((j) => (
+                  <MenuItem key={j.id} value={j.id}>
+                    {j.title}
+                    {j.status !== 'open' && (
+                      <Typography component="span" variant="body2" sx={{ color: 'text.secondary', whiteSpace: 'pre' }}>
+                        {` · ${JOB_STATUS_LABELS[j.status]}`}
+                      </Typography>
+                    )}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Stack>
           )
         }
       />
@@ -249,6 +275,14 @@ export default function Applications() {
             await load(jobId)
           }}
           onClose={() => setQuery(jobId, null)}
+        />
+      )}
+      {adding && (
+        <AddApplicationDialog
+          jobs={openJobs}
+          defaultJobId={jobId}
+          onAdded={added}
+          onClose={() => setAdding(false)}
         />
       )}
       <Snackbar

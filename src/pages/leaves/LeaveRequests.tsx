@@ -34,6 +34,7 @@ import { supabase } from '../../lib/supabase'
 import { LEAVE_STATUS_LABELS, formatDateRange, formatDays } from '../../lib/constants'
 import {
   LEAVE_WITH_TYPE,
+  calendarDays,
   leaveError,
   remainingOf,
   thisYear,
@@ -48,7 +49,7 @@ import { LeaveDialog, LeaveProgress, LeaveStatusChip } from '../../components/Le
 type View = 'mine' | LeaveStatus | 'all'
 
 export default function LeaveRequests() {
-  const { employee, isHr } = useAuth()
+  const { employee, isHr, isCompanyAdmin } = useAuth()
   const me = employee!.id
   const [year, setYear] = useState(thisYear)
   const [view, setView] = useState<View>('mine')
@@ -70,13 +71,13 @@ export default function LeaveRequests() {
   const [recording, setRecording] = useState(false)
 
   // RLS returns what the caller may see: everyone's for HR, direct reports' for managers.
+  // Never your own, except for a company admin, who may approve theirs.
   const load = useCallback(async () => {
     setLoading(true)
+    let leavesQuery = supabase.from('leaves').select(LEAVE_WITH_TYPE)
+    if (!isCompanyAdmin) leavesQuery = leavesQuery.neq('employee_id', me)
     const [leavesRes, directoryRes, chartRes, typesRes] = await Promise.all([
-      supabase
-        .from('leaves')
-        .select(LEAVE_WITH_TYPE)
-        .neq('employee_id', me)
+      leavesQuery
         .gte('start_date', `${year}-01-01`)
         .lte('start_date', `${year}-12-31`)
         .order('start_date', { ascending: false }),
@@ -93,7 +94,7 @@ export default function LeaveRequests() {
       setTypes(typesRes.data as LeaveType[])
     }
     setLoading(false)
-  }, [me, year])
+  }, [me, year, isCompanyAdmin])
 
   useEffect(() => {
     load()
@@ -106,6 +107,10 @@ export default function LeaveRequests() {
   // Mirrors leave_decide: what the caller's approval would add to a pending leave.
   function approvalAs(l: LeaveWithType) {
     if (l.status !== 'pending') return { hr: false, manager: false }
+    // A company admin approves their own as HR and as manager at once.
+    if (l.employee_id === me) {
+      return isCompanyAdmin ? { hr: !l.hr_approved_by, manager: !l.manager_approved_by } : { hr: false, manager: false }
+    }
     const managerId = managerOf.get(l.employee_id) ?? null
     return {
       // HR may also re-approve to finish a leave whose employee no longer has a manager.
@@ -117,8 +122,9 @@ export default function LeaveRequests() {
     const as = approvalAs(l)
     return as.hr || as.manager
   }
+  // Nobody rejects their own: they cancel it.
   const canReject = (l: LeaveWithType) =>
-    l.status === 'pending' && (isHr || managerOf.get(l.employee_id) === me)
+    l.status === 'pending' && l.employee_id !== me && (isHr || managerOf.get(l.employee_id) === me)
   const isOpen = (l: LeaveWithType) => l.status === 'pending' || l.status === 'approved'
 
   const awaitingMe = leaves.filter(canApprove).length
@@ -170,6 +176,7 @@ export default function LeaveRequests() {
   }
 
   function approveOutcome(l: LeaveWithType) {
+    if (l.employee_id === me) return 'This is your own leave. As a company admin you approve it as HR and as manager, which grants it.'
     const as = approvalAs(l)
     const managerId = managerOf.get(l.employee_id) ?? null
     const hrDone = !!l.hr_approved_by || as.hr
@@ -300,14 +307,20 @@ export default function LeaveRequests() {
                       )}
                     </TableCell>
                     <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                      {formatDateRange(l.start_date, l.end_date)}
+                      {formatDateRange(l.start_date, l.end_date, true)}
                       {l.half_day && (
                         <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
                           Half day
                         </Typography>
                       )}
                     </TableCell>
-                    <TableCell align="right">{l.days}</TableCell>
+                    {/* Working days (what the balance counts), then every day in the range. */}
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                      <Typography variant="body2">{l.days} working</Typography>
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        {calendarDays(l.start_date, l.end_date)} total
+                      </Typography>
+                    </TableCell>
                     <TableCell>
                       <LeaveStatusChip status={l.status} />
                     </TableCell>
@@ -339,11 +352,14 @@ export default function LeaveRequests() {
                       )}
                       {isHr && isOpen(l) && (
                         <>
-                          <Tooltip title="Change dates">
-                            <IconButton aria-label="Change dates" onClick={() => setEditing(l)}>
-                              <EditCalendarOutlinedIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
+                          {/* Nobody changes the dates of their own leave (leaves_guard). */}
+                          {l.employee_id !== me && (
+                            <Tooltip title="Change dates">
+                              <IconButton aria-label="Change dates" onClick={() => setEditing(l)}>
+                                <EditCalendarOutlinedIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                           <Tooltip title="Cancel leave">
                             <IconButton aria-label="Cancel leave" onClick={() => setCancelling(l)}>
                               <EventBusyOutlinedIcon fontSize="small" />

@@ -260,9 +260,11 @@ export function formatEmployeeNumber(n: number) {
 }
 
 // Dates are stored as plain YYYY-MM-DD; parse as local time so they don't shift a day.
-export function formatDate(value: string | null) {
+// With the weekday too when asked, e.g. "Mon, Jun 15, 2026".
+export function formatDate(value: string | null, withWeekday = false) {
   if (!value) return '—'
   return new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: withWeekday ? 'short' : undefined,
     day: 'numeric',
     month: 'short',
     year: 'numeric',
@@ -285,8 +287,10 @@ export function formatDayTime(timestamp: string) {
   })
 }
 
-export function formatDateRange(start: string, end: string) {
-  return start === end ? formatDate(start) : `${formatDate(start)} – ${formatDate(end)}`
+export function formatDateRange(start: string, end: string, withWeekday = false) {
+  return start === end
+    ? formatDate(start, withWeekday)
+    : `${formatDate(start, withWeekday)} – ${formatDate(end, withWeekday)}`
 }
 
 export function formatDays(n: number) {

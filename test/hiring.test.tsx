@@ -505,6 +505,96 @@ await choose('Job', 'HR Intern · Draft')
 check('switching job loads that job’s board', location.search === '?job=j-draft' &&
   captured.selects.filter((x) => x.table === 'job_applications').at(-1)?.filters[0]?.[2] === 'j-draft')
 
+// ---------------- HR adds an application received elsewhere ----------------
+reset()
+signInAs(PEOPLE.hr)
+table('job_openings').push({
+  id: 'j-old', title: 'QA Engineer', department_id: 'd-eng', designation_id: 'g-dev', status: 'open',
+  due_date: '2026-05-31', description: null, manager_id: null, created_by: 'e-bilal',
+  created_at: '2026-04-01T09:00:00Z', updated_at: '2026-04-01T09:00:00Z', interview_questions: ['Skills'],
+})
+await mountApp('/applications?job=j-open')
+await click(button('Add application'))
+const addDialog = () => dialog()!
+check('HR can add an application from the board, for the job on show',
+  addDialog().textContent?.includes('Add application') && valueOf('Job', addDialog()) === 'j-open', valueOf('Job', addDialog()))
+addDialog().querySelector('[role="combobox"]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+await waitFor(() => options().length > 0)
+check('…choosing among open jobs only, past their due date too',
+  options().map((o) => o.textContent).join() === 'Frontend Engineer,QA Engineer', options().map((o) => o.textContent).join())
+await click(options().find((o) => o.textContent === 'Frontend Engineer'))
+const stageField = field('Stage', addDialog())!
+stageField.querySelector('[role="combobox"]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+await waitFor(() => options().length > 0)
+check('…into Screened, Shortlisted, Test or Interview 1 only',
+  options().map((o) => o.textContent).join() === 'Screened,Shortlisted,Test,Interview 1', options().map((o) => o.textContent).join())
+await click(options().find((o) => o.textContent === 'Interview 1'))
+await type('Full name', '  Kamran Javed ', addDialog())
+await type('Email address', 'Kamran@Example.com', addDialog())
+await type('Phone number', '0321 7654321', addDialog())
+await type('Reason for switching', 'Relocating to Karachi.', addDialog())
+await click(button('Add application', addDialog()))
+check('Interview 1 needs remarks, and nothing is sent without them',
+  !!field('Remarks', addDialog())?.querySelector('textarea:not([aria-hidden])')?.matches(':invalid') &&
+  !captured.uploads.length && !captured.rpcs.some((r) => r.name === 'application_add'))
+await type('Remarks', 'Referred by Amna; interview on Thursday.', addDialog())
+await click(button('Add application', addDialog()))
+check('…nor without a CV',
+  addDialog().textContent?.includes('Attach the CV as a PDF.') && !captured.uploads.length &&
+  !captured.rpcs.some((r) => r.name === 'application_add'))
+await pickFile(pdf('Kamran CV.pdf'))
+await click(button('Add application', addDialog()))
+const added = captured.uploads[0]
+check('the CV goes into the job’s folder, as on the public page',
+  added?.bucket === 'job-applications' && /^j-open\/[0-9a-f-]{36}\.pdf$/.test(added.path), JSON.stringify(added))
+const addArgs = captured.rpcs.find((r) => r.name === 'application_add')?.args
+check('…then application_add, with the stage and remarks, the salaries left out when blank',
+  JSON.stringify(addArgs) === JSON.stringify({
+    p_job_opening_id: 'j-open', p_stage: 'interview_1', p_reason: 'Referred by Amna; interview on Thursday.',
+    p_full_name: '  Kamran Javed ', p_email: 'Kamran@Example.com', p_phone: '0321 7654321',
+    p_current_salary: null, p_current_salary_currency: 'PKR', p_expected_salary: null,
+    p_current_benefits: '', p_switch_reason: 'Relocating to Karachi.', p_notice_period_days: null,
+    p_note: '', p_resume_path: added?.path, p_resume_name: 'Kamran CV.pdf',
+  }), JSON.stringify(addArgs))
+check('…and only after the upload', captured.calls.indexOf('storage.upload') < captured.calls.indexOf('rpc.application_add'))
+check('the board shows it in its stage, opened',
+  await waitFor(() => column('Interview 1')?.textContent?.includes('Kamran Javed') &&
+    /application=new-/.test(location.search) && dialog()?.textContent?.includes('Kamran Javed')), location.search)
+check('…marked as added by HR, with the move and remarks in the timeline',
+  dialog()?.textContent?.includes('Added ') && timeline().includes('Added by HR') && timeline().includes('Bilal Ahmed') &&
+  timeline().includes('Moved to Interview 1') && timeline().includes('Referred by Amna') && !timeline().includes('Applied'),
+  timeline())
+
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/applications?job=j-open')
+await click(button('Add application'))
+await type('Full name', 'Hamza Ali', dialog()!)
+await type('Email address', 'a-short@example.com', dialog()!)
+await type('Phone number', '0300', dialog()!)
+await type('Current salary', '1.5', dialog()!)
+await pickFile(pdf())
+await click(button('Add application', dialog()!))
+check('salaries, when given, are whole numbers',
+  field('Current salary', dialog()!)!.querySelector('input')!.validity.stepMismatch && !captured.uploads.length)
+await type('Current salary', '200000', dialog()!)
+failNext('rpc.application_add', { code: '23505', message: 'duplicate key value violates unique constraint' })
+await click(button('Add application', dialog()!))
+check('a second application from the same email is explained',
+  await waitFor(() => dialog()?.textContent?.includes('This job already has an application from this email address.')))
+check('…and its uploaded CV is removed',
+  JSON.stringify(captured.removals) === JSON.stringify([{ bucket: 'job-applications', paths: [captured.uploads[0]?.path] }]),
+  JSON.stringify(captured.removals))
+const dupArgs = captured.rpcs.find((r) => r.name === 'application_add')?.args
+check('…having sent the stage (Screened by default) and the current salary',
+  dupArgs?.p_stage === 'screened' && dupArgs?.p_reason === null && dupArgs?.p_current_salary === 200000, JSON.stringify(dupArgs))
+
+reset()
+signInAs(PEOPLE.hr)
+table('job_openings')[0].status = 'closed'
+await mountApp('/applications?job=j-open')
+check('with no open job, nothing can be added', button('Add application')?.hasAttribute('disabled'))
+
 // ---------------- an interviewer ----------------
 reset()
 signInAs(PEOPLE.member) // Sara interviews for Frontend Engineer
@@ -513,6 +603,7 @@ table('application_test_files').push({
   uploaded_by: 'e-bilal', created_at: '2026-05-21T09:00:00Z',
 })
 await mountApp('/applications?job=j-open')
+check('only HR adds applications', !button('Add application'))
 check('an interviewer sees only shortlisted through cleared', columnLabels().join() ===
   'Shortlisted,Test,Interview 1,Interview 2,Interview 3,Cleared', columnLabels().join())
 await openCard('Ayesha Noor')

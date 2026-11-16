@@ -228,10 +228,26 @@ export const MAX_NOTICE_DAYS = 365
 // clients can't select.
 export const APPLICATION_COLUMNS =
   'id, job_opening_id, full_name, email, phone, note, resume_path, resume_name, created_at, stage, stage_changed_at, ' +
-  'switch_reason, notice_period_days'
+  'switch_reason, notice_period_days, added_by'
 // Those, from application_hr_details (HR and the job's hiring manager).
 export type ApplicationHrDetails = Pick<
   JobApplication,
   'current_salary' | 'current_salary_currency' | 'expected_salary' | 'current_benefits' | 'hr_notes'
 >
 export type BoardApplication = Omit<JobApplication, keyof ApplicationHrDetails>
+
+// ---------------------------------------------------------------------------
+// HR adds an application received elsewhere (application_add): an open job,
+// one of these stages, remarks where moving there needs them.
+// ---------------------------------------------------------------------------
+
+export const ADD_STAGES: ApplicationStage[] = ['screened', 'shortlisted', 'test', 'interview_1']
+
+export function addApplicationError(error: { code?: string; message: string }) {
+  if (error.code === '23505') return 'This job already has an application from this email address.'
+  if (error.code === '42501') return 'Only HR can add applications.'
+  if (error.code === 'P0002') return 'This job isn’t open, so applications can’t be added to it.'
+  if (error.code === '23514' && !error.message.startsWith('Give remarks'))
+    return 'Please check the details: name, a valid email address, a phone number, and a notice period of up to 365 days.'
+  return error.message
+}

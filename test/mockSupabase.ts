@@ -1467,6 +1467,26 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     return b ? { logo_path: b.logo_path, primary_color: b.primary_color, perks: b.perks } : null
   },
 
+  // HR adds one received elsewhere: written at its stage, with a move from New.
+  application_add: (a) => {
+    const id = `new-${nextId++}`
+    const now = new Date().toISOString()
+    rowsIn('job_applications').push({
+      id, job_opening_id: a.p_job_opening_id, full_name: String(a.p_full_name).trim(), email: String(a.p_email).trim().toLowerCase(),
+      phone: String(a.p_phone).trim(), current_salary: a.p_current_salary, current_salary_currency: a.p_current_salary_currency ?? 'PKR',
+      expected_salary: a.p_expected_salary, current_benefits: a.p_current_benefits || null,
+      switch_reason: a.p_switch_reason || null, notice_period_days: a.p_notice_period_days, note: a.p_note || null,
+      resume_path: a.p_resume_path, resume_name: a.p_resume_name, stage: a.p_stage, hr_notes: null,
+      created_at: now, stage_changed_at: now, added_by: authState.bound?.id ?? null,
+    })
+    rowsIn('application_stage_events').push({
+      id: nextId++, application_id: id, kind: 'move', from_stage: 'new', to_stage: a.p_stage, reason: a.p_reason,
+      created_by: authState.bound?.id, created_at: now, undone_by: null, undone_at: null,
+      test_score: null, interview_questions: null, interview_ratings: null,
+    })
+    return id
+  },
+
   submit_application: (a) => {
     rowsIn('job_applications').push({
       id: `new-${nextId++}`, job_opening_id: a.p_job_opening_id, full_name: a.p_full_name, email: a.p_email,

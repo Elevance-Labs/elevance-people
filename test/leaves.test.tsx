@@ -138,8 +138,8 @@ check('a refusal from the database is shown in words', dialog()?.textContent?.in
 reset()
 signInAs(PEOPLE.companyAdmin)
 await mountApp('/leaves/requests')
-check('requests never include my own leave', leaveReads().some((s) => has(s.filters, 'employee_id', 'neq', 'e-amna')),
-  JSON.stringify(leaveReads()))
+check('a company admin’s requests include their own leave', leaveReads().length > 0 &&
+  !leaveReads().some((s) => s.filters.some((f) => f[0] === 'employee_id')), JSON.stringify(leaveReads()))
 check('HR can record a leave for someone', !!button('Record leave'))
 check('as HR and Sara\'s manager, Amna can approve Sara\'s untouched leave', !!button('Approve', row('Family wedding')))
 check('…and the one HR already approved, as her manager', !!button('Approve', row('Moving house')))
@@ -156,11 +156,38 @@ check('approving calls leave_decide with approve and no reason',
     JSON.stringify([{ p_leave_id: 'l-pending', p_approve: true, p_reason: null }]),
   JSON.stringify(rpcCalls('leave_decide')))
 
+// A company admin approves their own leave; nobody else does.
+reset()
+signInAs(PEOPLE.companyAdmin)
+table('leaves').push({ ...table('leaves').find((l) => l.id === 'l-bilal')!, id: 'l-amna', employee_id: 'e-amna', reason: 'Own trip' })
+await mountApp('/leaves/requests')
+check('a company admin can approve their own pending leave', !!button('Approve', row('Own trip')))
+check('…but not reject it or change its dates, only cancel it',
+  !button('Reject', row('Own trip')) && !button('Change dates', row('Own trip')) && !!button('Cancel leave', row('Own trip')))
+await click(button('Approve', row('Own trip')))
+check('…and is told that grants it', dialog()?.textContent?.includes('As a company admin you approve it as HR and as manager'),
+  dialog()?.textContent)
+await click(button('Approve', dialog()!))
+check('…through leave_decide', JSON.stringify(rpcCalls('leave_decide').map((r) => r.args)) ===
+  JSON.stringify([{ p_leave_id: 'l-amna', p_approve: true, p_reason: null }]), JSON.stringify(rpcCalls('leave_decide')))
+
 // Bilal is HR but nobody's manager.
 reset()
 signInAs(PEOPLE.hr)
+// Wed 24 Jun to Tue 30 Jun: Ashura (Thu–Fri) and a weekend in between.
+table('leaves').push({ ...table('leaves').find((l) => l.id === 'l-pending')!, id: 'l-long', start_date: '2026-06-24',
+  end_date: '2026-06-30', days: 3, reason: 'Long week' })
 await mountApp('/leaves/requests')
+check('total days count the weekend and holidays, working days don’t',
+  row('Long week')?.textContent?.includes('3 working') && row('Long week')?.textContent?.includes('7 total'),
+  row('Long week')?.textContent)
 check('HR approves what still needs HR', !!button('Approve', row('Family wedding')))
+check('an HR admin’s requests never include their own leave',
+  leaveReads().some((s) => has(s.filters, 'employee_id', 'neq', 'e-bilal')) && !row('Dentist'), JSON.stringify(leaveReads()))
+check('the dates show their weekdays',
+  /Mon.*Jun 15.*Wed.*Jun 17/.test(row('Family wedding')?.textContent ?? ''), row('Family wedding')?.textContent)
+check('…and the days, working and in total',
+  row('Family wedding')?.textContent?.includes('3 working') && row('Family wedding')?.textContent?.includes('3 total'))
 check('HR is not offered approval it has already given', !row('Moving house'),
   'the HR-approved leave should not be waiting for Bilal')
 await click(button('Approve', row('Family wedding')))
