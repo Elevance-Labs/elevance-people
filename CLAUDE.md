@@ -180,7 +180,7 @@ behaviour).
   reviews; the designation's current KPIs and expectations always listed,
   unscored until rated), pinned announcements (body
   only; *View all* opens the drawer in `components/Announcements.tsx` with the
-  last 4 months'), offboarding reminders (HR and managers: to sign off; managers: a
+  last 4 months') beside who's off (`who_is_off`, avatars: today, next 30 days), offboarding reminders (HR and managers: to sign off; managers: a
   report leaving), appraisals to approve (company admins), own leave balance and upcoming leave, upcoming holidays, then the company values
   (static, in `components/CompanyValues.tsx`).
 - `/resources` — everyone: tab *Work ethics* (the remote work &
@@ -421,6 +421,8 @@ Full detail in `supabase/schema.sql`.
   company admin approving theirs, as HR and manager at once) and
   `leave_cancel`.
   `leave_balances` returns quota/approved/pending per type for one person-year.
+  `who_is_off` — everyone's dashboard: approved leave of login statuses,
+  today to 30 days out, name and dates only (no type or reason).
 - `departments` → `designations` → `kpis` and `expectations` — company
   config; everyone reads, company admins write departments and designations,
   HR KPIs and expectations. A department has a `business_function` enum (production, growth,

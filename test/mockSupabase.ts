@@ -1455,6 +1455,27 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     return null
   },
 
+  // Approved leave of people who may log in, ending today or later and
+  // starting within 30 days: name, dates and half day only.
+  who_is_off: () => {
+    if (!authState.bound) return []
+    const now = new Date()
+    const iso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const today = iso(now)
+    const horizon = iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30))
+    const people = rowsIn('employees')
+    return rowsIn('leaves')
+      .filter((l) => l.status === 'approved' && String(l.end_date) >= today && String(l.start_date) <= horizon)
+      .map((l) => ({ l, e: people.find((e) => e.id === l.employee_id) }))
+      .filter(({ e }) => e && ['probation', 'extended_probation', 'active', 'notice_period'].includes(String(e.status)))
+      .sort((a, b) =>
+        String(a.l.start_date).localeCompare(String(b.l.start_date)) || String(a.e!.full_name).localeCompare(String(b.e!.full_name)))
+      .map(({ l, e }) => ({
+        employee_id: l.employee_id, full_name: e!.full_name, start_date: l.start_date, end_date: l.end_date, half_day: !!l.half_day,
+      }))
+  },
+
   // The caller's equipment: name, identifier and date only, newest first.
   my_equipment: () =>
     rowsIn('equipment')

@@ -175,6 +175,16 @@ export interface LeaveBalance {
   pending: number
 }
 
+// A row of the who_is_off RPC: someone's approved leave, today or within 30
+// days. Name and dates only; never the type or reason.
+export interface OffRow {
+  employee_id: string
+  full_name: string
+  start_date: string
+  end_date: string
+  half_day: boolean
+}
+
 export type JobOpeningStatus = 'draft' | 'open' | 'on_hold' | 'closed'
 
 export interface JobOpening {

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Alert, Box, Button, Divider, LinearProgress, Paper, Stack, Typography } from '@mui/material'
+import { Alert, Box, Button, Divider, LinearProgress, Paper, Stack, Tooltip, Typography } from '@mui/material'
 import { useAuth } from '../../auth/AuthProvider'
 import { supabase } from '../../lib/supabase'
 import { formatDate, formatDateRange, formatDays } from '../../lib/constants'
@@ -8,8 +8,8 @@ import { HOLIDAY_COLUMNS, LEAVE_WITH_TYPE, thisYear, todayIso, type LeaveWithTyp
 import { currentCycle, monthLabel, type CurrentLines, type ReviewWithLines } from '../../lib/performance'
 import { ASSIGNMENT_WITH_CYCLE, cycleLabel, quarterOf, type AssignmentWithCycle } from '../../lib/peerReviews'
 import { OFFBOARDING_LIST, signOffOf, type OffboardingListRow } from '../../lib/offboarding'
-import type { Announcement, Holiday, LeaveBalance, OrgNode, PerformanceReview, ReviewDue, OneOnOne } from '../../lib/types'
-import { PageHeader } from '../../components/common'
+import type { Announcement, Holiday, LeaveBalance, OffRow, OrgNode, PerformanceReview, ReviewDue, OneOnOne } from '../../lib/types'
+import { PageHeader, PersonAvatar } from '../../components/common'
 import { BalanceCards, HolidayList, LeaveStatusChip } from '../../components/Leaves'
 import { CompanyValues } from '../../components/CompanyValues'
 import { ScoreSummary } from '../../components/Performance'
@@ -195,6 +195,88 @@ function PerformanceNotices() {
         </Alert>
       )}
     </Stack>
+  )
+}
+
+// Day and month, for the who's off tiles: "Jun 15".
+const dayMonth = (iso: string) =>
+  new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+
+// One person off, as an avatar with their first name and when.
+function OffTile({ row, when }: { row: OffRow; when: string }) {
+  const range = formatDateRange(row.start_date, row.end_date)
+  return (
+    <Tooltip title={`${row.full_name} · ${range}${row.half_day ? ' · Half day' : ''}`}>
+      <Stack spacing={0.5} sx={{ width: 84, alignItems: 'center', textAlign: 'center' }}>
+        <PersonAvatar name={row.full_name} size={44} />
+        <Typography variant="body2" noWrap sx={{ fontWeight: 500, maxWidth: '100%' }}>
+          {row.full_name.trim().split(/\s+/)[0]}
+        </Typography>
+        <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.2 }}>
+          {when}
+        </Typography>
+      </Stack>
+    </Tooltip>
+  )
+}
+
+// Who's off today and in the next 30 days. Everyone's leaves are private
+// (RLS), so this reads who_is_off: approved leave, names and dates only.
+function WhoIsOff() {
+  const [rows, setRows] = useState<OffRow[] | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    supabase.rpc('who_is_off').then(({ data, error }) => {
+      if (error) setFailed(true)
+      else setRows((data ?? []) as OffRow[])
+    })
+  }, [])
+
+  const today = todayIso()
+  const offToday = (rows ?? []).filter((r) => r.start_date <= today)
+  const later = (rows ?? []).filter((r) => r.start_date > today)
+  const todayWhen = (r: OffRow) =>
+    r.half_day ? 'Half day' : r.end_date === today ? 'Today' : `Until ${dayMonth(r.end_date)}`
+  const laterWhen = (r: OffRow) =>
+    r.start_date === r.end_date
+      ? `${dayMonth(r.start_date)}${r.half_day ? ' · Half' : ''}`
+      : `${dayMonth(r.start_date)} – ${dayMonth(r.end_date)}`
+  const tiles = (list: OffRow[], when: (r: OffRow) => string, empty: string) =>
+    list.length ? (
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+        {list.map((r) => (
+          <OffTile key={`${r.employee_id}-${r.start_date}`} row={r} when={when(r)} />
+        ))}
+      </Box>
+    ) : (
+      <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+        {empty}
+      </Typography>
+    )
+
+  return (
+    <Section title="Who's off">
+      {failed ? (
+        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+          Couldn't load who's off.
+        </Typography>
+      ) : (
+        rows && (
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Typography variant="subtitle2" component="h3" sx={{ mb: 1.5 }}>
+              Today
+            </Typography>
+            {tiles(offToday, todayWhen, "Everyone's in today.")}
+            <Divider sx={{ my: 2 }} />
+            <Typography variant="subtitle2" component="h3" sx={{ mb: 1.5 }}>
+              Next 30 days
+            </Typography>
+            {tiles(later, laterWhen, 'No leave coming up.')}
+          </Paper>
+        )
+      )}
+    </Section>
   )
 }
 
@@ -397,28 +479,38 @@ export default function Dashboard() {
       <OffboardingNotices />
       <AppraisalNotice />
 
+      {/* Announcements and who's off side by side; stacked on a phone. */}
       {!loading && !error && (
-        <Section
-          title="Announcements"
-          icon={<AnnouncementsIcon size={32} />}
-          action={
-            <Button size="small" onClick={() => setAllAnnouncements(true)}>
-              View all
-            </Button>
-          }
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'repeat(2, minmax(0, 1fr))' },
+            columnGap: 3,
+          }}
         >
-          {announcements.length ? (
-            <Stack spacing={2}>
-              {announcements.map((a) => (
-                <AnnouncementCard key={a.id} html={a.body} />
-              ))}
-            </Stack>
-          ) : (
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              Nothing pinned right now.
-            </Typography>
-          )}
-        </Section>
+          <Section
+            title="Announcements"
+            icon={<AnnouncementsIcon size={32} />}
+            action={
+              <Button size="small" onClick={() => setAllAnnouncements(true)}>
+                View all
+              </Button>
+            }
+          >
+            {announcements.length ? (
+              <Stack spacing={2}>
+                {announcements.map((a) => (
+                  <AnnouncementCard key={a.id} html={a.body} />
+                ))}
+              </Stack>
+            ) : (
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Nothing pinned right now.
+              </Typography>
+            )}
+          </Section>
+          <WhoIsOff />
+        </Box>
       )}
       <AnnouncementsDrawer open={allAnnouncements} onClose={() => setAllAnnouncements(false)} />
 

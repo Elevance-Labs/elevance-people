@@ -1928,6 +1928,24 @@ language sql stable security definer set search_path = '' as $$
    order by t.name;
 $$;
 
+-- Who's off, for everyone's dashboard: approved leave of people who may log
+-- in, ending today or later and starting within 30 days (Pakistan time, as
+-- company_today). Name, dates and half day only: no type, reason or days.
+-- Empty unless the caller is a bound employee.
+create function public.who_is_off()
+returns table (employee_id uuid, full_name text, start_date date, end_date date, half_day boolean)
+language sql stable security definer set search_path = '' as $$
+  select l.employee_id, e.full_name, l.start_date, l.end_date, l.half_day
+    from public.leaves l
+    join public.employees e on e.id = l.employee_id
+   where (select public.current_employee_id()) is not null
+     and l.status = 'approved'
+     and public.is_login_status(e.status)
+     and l.end_date >= (now() at time zone 'Asia/Karachi')::date
+     and l.start_date <= (now() at time zone 'Asia/Karachi')::date + 30
+   order by l.start_date, e.full_name;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Public functions: the only way in for someone who isn't signed in (the
 -- public job page). Executable by anon.
@@ -4405,6 +4423,10 @@ grant execute on function
 -- An employee's own payslips.
 revoke execute on function public.my_payslips() from public, anon, authenticated;
 grant execute on function public.my_payslips() to authenticated;
+
+-- Who's off: everyone's dashboard.
+revoke execute on function public.who_is_off() from public, anon, authenticated;
+grant execute on function public.who_is_off() to authenticated;
 
 -- The public job page, for people who aren't signed in.
 grant execute on function

@@ -77,6 +77,47 @@ check('with nothing pinned, the section says so and still offers them all',
   section('Announcements')?.textContent?.includes('Nothing pinned right now.') && !!button('View all', section('Announcements')!),
   section('Announcements')?.textContent)
 check('with no leave coming up, it says so', text().includes('No upcoming leave.'))
+check('…and nobody is off', !!section("Who's off")?.textContent?.includes("Everyone's in today.") &&
+  !!section("Who's off")?.textContent?.includes('No leave coming up.'), section("Who's off")?.textContent)
+
+// ---------------- who's off ----------------
+// Today is Wed 10 Jun. Amna is off until Fri 12 Jun, Bilal for half of today,
+// Sara (approved) on 1 Jul; Sara's pending 15 Jun, Bilal's 3 Aug (past 30
+// days) and Omar (left) don't show.
+reset()
+signInAs(PEOPLE.member)
+const offLeave = (id: string, who: string, start: string, end: string, status: string, extra = {}) => ({
+  id, employee_id: who, leave_type_id: 't-sick', start_date: start, end_date: end, half_day: false, days: 1,
+  reason: 'Private reason', status, ...extra,
+})
+table('leaves').push(
+  offLeave('o-amna', 'e-amna', '2026-06-09', '2026-06-12', 'approved'),
+  offLeave('o-bilal', 'e-bilal', '2026-06-10', '2026-06-10', 'approved', { half_day: true }),
+  offLeave('o-bilal-aug', 'e-bilal', '2026-08-03', '2026-08-03', 'approved'),
+  offLeave('o-omar', 'e-omar', '2026-06-10', '2026-06-10', 'approved'),
+)
+await mountApp('/dashboard')
+check('who\'s off is read through who_is_off, with nothing passed',
+  captured.rpcs.some((r) => r.name === 'who_is_off' && r.args === undefined), JSON.stringify(captured.rpcs))
+const off = section("Who's off")
+const [todayPart, laterPart] = [...(off?.querySelectorAll('h3') ?? [])].map((h) => h.nextElementSibling?.textContent ?? '')
+check('today shows who\'s off now, as avatars with first name and when',
+  todayPart.includes('AKAmnaUntil Jun 12') && todayPart.includes('BABilalHalf day'), todayPart)
+check('the next 30 days show approved leave to come',
+  laterPart.includes('SISaraJul 1') && !laterPart.includes('Aug'), laterPart)
+check('…never pending leave, someone who has left, or the type or reason',
+  !off?.textContent?.includes('Jun 15') && !off?.textContent?.includes('Omar') &&
+  !off?.textContent?.includes('Sick') && !off?.textContent?.includes('Surgery') &&
+  !off?.textContent?.includes('Private reason'), off?.textContent)
+check('it sits beside the announcements', off?.parentElement === section('Announcements')?.parentElement &&
+  off?.parentElement?.children.length === 2)
+
+reset()
+signInAs(PEOPLE.member)
+failNext('rpc.who_is_off', { message: 'network down' })
+await mountApp('/dashboard')
+check('a failed who\'s off load says so, and the rest of the dashboard still shows',
+  !!section("Who's off")?.textContent?.includes("Couldn't load who's off.") && !!section('Announcements'))
 
 // ---------------- my performance ----------------
 // Sara's March (4 and 3, both met) and April (3 and 2, standup not met).
