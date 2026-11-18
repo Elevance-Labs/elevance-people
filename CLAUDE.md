@@ -184,7 +184,7 @@ behaviour).
   unscored until rated), pinned announcements (body
   only; *View all* opens the drawer in `components/Announcements.tsx` with the
   last 4 months') beside who's off (`who_is_off`, avatars: today, next 30 days), offboarding reminders (HR and managers: to sign off; managers: a
-  report leaving), appraisals to approve (company admins), own leave balance and upcoming leave, upcoming holidays, then the company values
+  report leaving), appraisals to approve (company admins), own upcoming leave (no balance), upcoming holidays, then the company values
   (static, in `components/CompanyValues.tsx`).
 - `/resources` — everyone: tab *Work ethics* (the remote work &
   collaboration guidelines, static, in `components/WorkingGuidelines.tsx`),

@@ -50,13 +50,10 @@ check('…as the body alone: no author or date',
   shown?.querySelector('.MuiPaper-root')?.textContent)
 check('…keeping its formatting', !!shown?.querySelector('strong'))
 
-check('the leave balance is this year\'s, for this person',
-  captured.rpcs.some((r) => r.name === 'leave_balances' &&
-    JSON.stringify(r.args) === JSON.stringify({ p_employee_id: 'e-sara', p_year: 2026 })),
-  JSON.stringify(captured.rpcs))
-const balance = section('Leave balance 2026')
-check('…shown per type', !!balance && balance.textContent?.includes('Annual') &&
-  balance.textContent?.includes('2 taken · 5 pending · 14 this year'), balance?.textContent)
+check('the dashboard shows no leave balance',
+  !captured.rpcs.some((r) => r.name === 'leave_balances') && !text().includes('Leave balance') &&
+  !text().includes('this year'), JSON.stringify(captured.rpcs))
+const balance = section('Upcoming leave')
 const leaveRead = captured.selects.find((s) => s.table === 'leaves')
 check('upcoming leave is my pending and approved leave that hasn\'t ended',
   JSON.stringify(leaveRead?.filters) === JSON.stringify([
@@ -267,7 +264,7 @@ signInAs(PEOPLE.member)
 await mountApp('/dashboard')
 const sections = [...document.querySelectorAll('main section')].map((s) => s.querySelector('h2')?.textContent)
 check('the values come last on the dashboard', sections.at(-1) === 'Our values', sections.join())
-check('…and the working guidelines are not on it', !text().includes('Remote Work & Collaboration Guidelines'))
+check('…and the working guidelines are not on it', !text().includes('Collaboration & Remote Work Guidelines'))
 const values = section('Our values')!
 const cards = [...values.querySelectorAll<HTMLElement>('button[aria-expanded]')]
 const visible = (el: Element) => !el.closest('[aria-hidden="true"]')
@@ -300,7 +297,7 @@ const pageTab = (label: string) => pageTabs().find((t) => t.textContent === labe
 check('it opens on Work ethics, with a tab for my own function\'s guides only',
   pageTabs().map((t) => t.textContent).join() === 'Work ethics,Production guides' &&
   pageTab('Work ethics')?.getAttribute('aria-selected') === 'true', pageTabs().map((t) => t.textContent).join())
-const guide = () => section('Remote Work & Collaboration Guidelines')!
+const guide = () => section('Collaboration & Remote Work Guidelines')!
 const selectedNorms = () => guide().querySelector('[role="tab"][aria-selected="true"]')?.textContent
 const panel = () => guide().querySelector('[role="tabpanel"]')?.textContent ?? ''
 check('the guidelines lead with focus, transparency and async clarity',
@@ -343,7 +340,7 @@ check('…and one with a doc links to its page',
 check('other functions\' guides are never shown', !text().includes('Sales') && !text().includes('About hr.'))
 await click(pageTab('Work ethics'))
 check('back to Work ethics clears the tab',
-  await waitFor(() => location.search === '' && !!section('Remote Work & Collaboration Guidelines')), location.search)
+  await waitFor(() => location.search === '' && !!section('Collaboration & Remote Work Guidelines')), location.search)
 
 reset()
 signInAs(PEOPLE.member)
@@ -381,7 +378,7 @@ signInAs(PEOPLE.member)
 failNext('guides.select', { message: 'network down' })
 await mountApp('/resources')
 check('a failed load says so, and the work ethics still show',
-  text().includes('network down') && !!section('Remote Work & Collaboration Guidelines'))
+  text().includes('network down') && !!section('Collaboration & Remote Work Guidelines'))
 
 // ---------------- a guide ----------------
 reset()

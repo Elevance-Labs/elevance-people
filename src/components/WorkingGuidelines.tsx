@@ -336,16 +336,11 @@ export function WorkingGuidelines() {
           </Box>
           <Box sx={{ minWidth: 0 }}>
             <Typography id="guidelines-title" variant="h6" component="h2">
-              Remote Work & Collaboration Guidelines
+              Collaboration & Remote Work Guidelines
             </Typography>
             <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
               Respect for focus, transparency, and async clarity, across Google Workspace, Google Chat and Jira.
             </Typography>
-            <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
-              {['🧠 Focus', '🔍 Transparency', '⏳ Async clarity'].map((p) => (
-                <Chip key={p} label={p} size="small" sx={{ bgcolor: 'background.paper', fontWeight: 600 }} />
-              ))}
-            </Stack>
           </Box>
         </Stack>
       </Paper>

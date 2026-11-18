@@ -4,13 +4,13 @@ import { Alert, Box, Button, Divider, LinearProgress, Paper, Stack, Tooltip, Typ
 import { useAuth } from '../../auth/AuthProvider'
 import { supabase } from '../../lib/supabase'
 import { formatDate, formatDateRange, formatDays } from '../../lib/constants'
-import { HOLIDAY_COLUMNS, LEAVE_WITH_TYPE, thisYear, todayIso, type LeaveWithType } from '../../lib/leaves'
+import { HOLIDAY_COLUMNS, LEAVE_WITH_TYPE, todayIso, type LeaveWithType } from '../../lib/leaves'
 import { currentCycle, monthLabel, type CurrentLines, type ReviewWithLines } from '../../lib/performance'
 import { ASSIGNMENT_WITH_CYCLE, cycleLabel, quarterOf, type AssignmentWithCycle } from '../../lib/peerReviews'
 import { OFFBOARDING_LIST, signOffOf, type OffboardingListRow } from '../../lib/offboarding'
-import type { Announcement, Holiday, LeaveBalance, OffRow, OrgNode, PerformanceReview, ReviewDue, OneOnOne } from '../../lib/types'
+import type { Announcement, Holiday, OffRow, OrgNode, PerformanceReview, ReviewDue, OneOnOne } from '../../lib/types'
 import { PageHeader, PersonAvatar } from '../../components/common'
-import { BalanceCards, HolidayList, LeaveStatusChip } from '../../components/Leaves'
+import { HolidayList, LeaveStatusChip } from '../../components/Leaves'
 import { CompanyValues } from '../../components/CompanyValues'
 import { ScoreSummary } from '../../components/Performance'
 import { AnnouncementCard, AnnouncementsDrawer, AnnouncementsIcon } from '../../components/Announcements'
@@ -419,9 +419,7 @@ function OffboardingNotices() {
 export default function Dashboard() {
   const { employee } = useAuth()
   const me = employee!.id
-  const year = thisYear()
   const [announcements, setAnnouncements] = useState<Pick<Announcement, 'id' | 'body'>[]>([])
-  const [balances, setBalances] = useState<LeaveBalance[]>([])
   const [upcoming, setUpcoming] = useState<LeaveWithType[]>([])
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [loading, setLoading] = useState(true)
@@ -440,7 +438,6 @@ export default function Dashboard() {
         .select('id, body')
         .gte('pinned_until', today)
         .order('created_at', { ascending: false }),
-      supabase.rpc('leave_balances', { p_employee_id: me, p_year: year }),
       supabase
         .from('leaves')
         .select(LEAVE_WITH_TYPE)
@@ -449,18 +446,17 @@ export default function Dashboard() {
         .gte('end_date', today)
         .order('start_date'),
       supabase.from('holidays').select(HOLIDAY_COLUMNS).gte('end_date', today).order('start_date'),
-    ]).then(([announcementsRes, balancesRes, leavesRes, holidaysRes]) => {
-      const failure = announcementsRes.error ?? balancesRes.error ?? leavesRes.error ?? holidaysRes.error
+    ]).then(([announcementsRes, leavesRes, holidaysRes]) => {
+      const failure = announcementsRes.error ?? leavesRes.error ?? holidaysRes.error
       if (failure) setError(failure.message)
       else {
         setAnnouncements(announcementsRes.data as Pick<Announcement, 'id' | 'body'>[])
-        setBalances(balancesRes.data as LeaveBalance[])
         setUpcoming(leavesRes.data as unknown as LeaveWithType[])
         setHolidays((holidaysRes.data as Holiday[]).slice(0, HOLIDAYS_SHOWN))
       }
       setLoading(false)
     })
-  }, [me, year])
+  }, [me])
 
   const firstName = employee!.full_name.trim().split(/\s+/)[0]
 
@@ -518,24 +514,13 @@ export default function Dashboard() {
 
       {!loading && !error && (
         <Section
-          title={`Leave balance ${year}`}
+          title="Upcoming leave"
           action={
             <Button component={Link} to="/leaves" size="small">
               My leaves
             </Button>
           }
         >
-          {balances.length ? (
-            <BalanceCards balances={balances} />
-          ) : (
-            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
-              HR hasn't set up any leave types yet.
-            </Typography>
-          )}
-
-          <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 500, mb: 1 }}>
-            Upcoming leave
-          </Typography>
           <Paper variant="outlined">
             {upcoming.slice(0, UPCOMING_SHOWN).map((l, i) => (
               <Box key={l.id}>
