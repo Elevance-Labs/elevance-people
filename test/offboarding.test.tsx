@@ -126,8 +126,9 @@ function saraManagesOmar() {
 
 saraManagesOmar()
 await mountApp('/dashboard')
-check('a manager is told someone on their team is leaving',
-  text().includes('Someone on your team is leaving'), text().slice(0, 400))
+check('a manager is nudged about their department’s section of a report’s offboarding',
+  await waitFor(() => text().includes('Omar Farooq’s offboarding: Handover (1 task left).')), text().slice(0, 600))
+check('…linking to it', !!document.querySelector('[data-todo] a[href*="/hr/offboarding/off-omar-2"]'))
 await mountApp('/hr/offboarding/off-omar-2')
 check('a manager can open their report\'s offboarding', location.pathname === '/hr/offboarding/off-omar-2')
 check('…but not change the details or cancel it', !button('Set details') && !button('Change') && !button('Cancel offboarding'))
@@ -149,7 +150,7 @@ for (const t of table('offboarding_tasks')) t.done_at ??= '2026-06-09T09:00:00Z'
 signInAs(PEOPLE.hr)
 await mountApp('/dashboard')
 check('HR is told an offboarding waits for their sign-off',
-  text().includes('1 offboarding is waiting for your sign-off.'), text().slice(0, 400))
+  await waitFor(() => text().includes('Sara Iqbal’s offboarding is waiting for your sign-off.')), text().slice(0, 800))
 check('…linking to it', !!document.querySelector('a[href*="/hr/offboarding/off-sara"]'))
 
 reset()

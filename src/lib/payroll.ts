@@ -25,6 +25,10 @@ export const MONTHS = Array.from({ length: 12 }, (_, i) =>
   new Date(2000, i, 1).toLocaleDateString(undefined, { month: 'long' }),
 )
 
+// From this day of the month, the dashboard reminds payroll roles to start
+// the month's payroll if nobody has.
+export const PAYROLL_START_DAY = 25
+
 export const periodLabel = (p: Pick<Payroll, 'year' | 'month'>) => `${MONTHS[p.month - 1]} ${p.year}`
 
 // Newest month first.

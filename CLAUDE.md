@@ -175,16 +175,19 @@ behaviour).
 - `/jobs` offers the careers page link (with and without branding).
 - Otherwise no session → `Login` (Google; email and password, with a reset
   link, for password logins); no other routes exist until signed in.
-- `/dashboard` — everyone; the landing page. Performance reminders (reviews
-  to submit, own reviews and HR feedback to acknowledge, peer reviews to
-  write, feedback on one's manager at the current 1:1, HR: a quarter with no
-  peer reviews), own scores (*My performance*: performance, KPI and
+- `/dashboard` — everyone; the landing page. *To do* first
+  (`components/Todos.tsx`, builders in `lib/todos.ts`: performance reminders,
+  leave to approve, claims to approve / process / disburse, one nudge per
+  onboarding / offboarding section left — a department's to the manager in
+  it, the rest to HR — offboarding details and sign-off, the payroll's next
+  step and a start nudge from the 25th, appraisals to approve; hidden when
+  empty), own scores (*My performance*: performance, KPI and
   expectation scores, each KPI's and expectation's average over own submitted
   reviews; the designation's current KPIs and expectations always listed,
   unscored until rated), pinned announcements (body
   only; *View all* opens the drawer in `components/Announcements.tsx` with the
-  last 4 months') beside who's off (`who_is_off`, avatars: today, next 30 days), offboarding reminders (HR and managers: to sign off; managers: a
-  report leaving), appraisals to approve (company admins), own upcoming leave (no balance), upcoming holidays, then the company values
+  last 4 months') beside who's off (`who_is_off`, avatars: today, next 30 days),
+  own upcoming leave (no balance), upcoming holidays, then the company values
   (static, in `components/CompanyValues.tsx`).
 - `/resources` — everyone: tab *Work ethics* (the remote work &
   collaboration guidelines, static, in `components/WorkingGuidelines.tsx`),
@@ -298,9 +301,12 @@ behaviour).
 - `constants.ts` — company domain, handbook doc URLs, enum labels/colours (role, status,
   employment type), document types and upload limits, number/date formatting.
   Dates are plain `YYYY-MM-DD`, parsed as local time.
+- `todos.ts` — the dashboard's to-dos: one builder per source deciding
+  whether the next step is the viewer's (mirrors of the approval, checklist,
+  sign-off and payroll rules), their order and due caption.
 - `install.ts` — the device and browser (`detectDevice`), running installed
   or in a tab (`isStandalone`), the install steps for each (`installGuide`).
-- `leaves.ts` — leave select with its type, client mirror of the working-day
+- `leaves.ts` — leave select with its type, who may approve a pending leave (mirror of `leave_decide`), client mirror of the working-day
   count (weekends and holidays out), holiday columns and helpers, year
   helpers, balance maths, leave and holiday error messages.
 - `hiring.ts` — job select (named FKs), public careers and job URLs (and
@@ -316,7 +322,7 @@ behaviour).
   `salary_on`), active / upcoming / past, change %, error messages.
 - `offboarding.ts` — offboarding list select (names from the directory), the
   sign-off state (mirror of `offboarding_sign_off`), error messages.
-- `payroll.ts` — payroll selects, which columns HR vs finance edit, client
+- `payroll.ts` — payroll selects, the day the start nudge begins, which columns HR vs finance edit, client
   mirror of bonus / gross / net, totals, CSV building, file download, the
   payslip breakdown, error messages.
 - `performance.ts` — review select with its lines, months and quarters,
@@ -378,6 +384,8 @@ behaviour).
 - `components/Reimbursements.tsx` — claim status chip, and the claim dialog
   (details, receipts, history, and the viewer's actions: withdraw, approve,
   reject, process, disburse); shared by both reimbursement pages.
+- `components/Todos.tsx` — the dashboard's *To do* card: reads what the
+  viewer's roles may act on and lists the nudges, overdue first.
 - `components/RichText.tsx` — TipTap editor with toolbar (heavy: only the
   lazy job form and announcements pages import it). `components/RichTextView.tsx` — sanitised read-only HTML.
 - `components/common.tsx` — logo, avatar, status chips, page header, confirm and

@@ -3,15 +3,14 @@ import { Link } from 'react-router-dom'
 import { Alert, Box, Button, Divider, LinearProgress, Paper, Stack, Tooltip, Typography } from '@mui/material'
 import { useAuth } from '../../auth/AuthProvider'
 import { supabase } from '../../lib/supabase'
-import { formatDate, formatDateRange, formatDays } from '../../lib/constants'
+import { formatDateRange, formatDays } from '../../lib/constants'
 import { HOLIDAY_COLUMNS, LEAVE_WITH_TYPE, todayIso, type LeaveWithType } from '../../lib/leaves'
-import { currentCycle, monthLabel, type CurrentLines, type ReviewWithLines } from '../../lib/performance'
-import { ASSIGNMENT_WITH_CYCLE, cycleLabel, quarterOf, type AssignmentWithCycle } from '../../lib/peerReviews'
-import { OFFBOARDING_LIST, signOffOf, type OffboardingListRow } from '../../lib/offboarding'
-import type { Announcement, Holiday, OffRow, OrgNode, PerformanceReview, ReviewDue, OneOnOne } from '../../lib/types'
+import type { CurrentLines, ReviewWithLines } from '../../lib/performance'
+import type { Announcement, Holiday, OffRow } from '../../lib/types'
 import { PageHeader, PersonAvatar } from '../../components/common'
 import { HolidayList, LeaveStatusChip } from '../../components/Leaves'
 import { CompanyValues } from '../../components/CompanyValues'
+import { Todos } from '../../components/Todos'
 import { ScoreSummary } from '../../components/Performance'
 import { AnnouncementCard, AnnouncementsDrawer, AnnouncementsIcon } from '../../components/Announcements'
 
@@ -42,159 +41,6 @@ function Section({
       </Stack>
       {children}
     </Box>
-  )
-}
-
-// What's waiting on the person in Performance: reviews of their reports still
-// to submit (managers), their own reviews and HR feedback still to acknowledge,
-// peer reviews to write, feedback on their manager while its window is open,
-// and (HR) a quarter with no peer reviews set up.
-function PerformanceNotices() {
-  const { employee, isManager, isHr } = useAuth()
-  const me = employee!.id
-  const [toSubmit, setToSubmit] = useState<ReviewDue[]>([])
-  const [toRead, setToRead] = useState<Pick<PerformanceReview, 'id' | 'period'>[]>([])
-  const [feedback, setFeedback] = useState(0)
-  const [peerToWrite, setPeerToWrite] = useState<AssignmentWithCycle[]>([])
-  const [noPeerCycle, setNoPeerCycle] = useState(false)
-  // Their current 1:1, while their feedback on their manager is still owed.
-  const [managerFeedbackDue, setManagerFeedbackDue] = useState<OneOnOne | null>(null)
-
-  useEffect(() => {
-    supabase
-      .from('performance_reviews')
-      .select('id, period')
-      .eq('employee_id', me)
-      .eq('status', 'submitted')
-      .is('acknowledged_at', null)
-      .then(({ data }) => setToRead((data ?? []) as Pick<PerformanceReview, 'id' | 'period'>[]))
-    supabase
-      .from('hr_feedback')
-      .select('id')
-      .eq('employee_id', me)
-      .is('acknowledged_at', null)
-      .then(({ data }) => setFeedback(data?.length ?? 0))
-    supabase
-      .from('peer_review_assignments')
-      .select(ASSIGNMENT_WITH_CYCLE)
-      .eq('reviewer_id', me)
-      .is('submitted_at', null)
-      .then(({ data }) =>
-        setPeerToWrite(
-          ((data ?? []) as unknown as AssignmentWithCycle[])
-            .filter((a) => a.cycle?.status === 'open')
-            .sort((a, b) => a.cycle!.due_date.localeCompare(b.cycle!.due_date)),
-        ),
-      )
-    supabase
-      .rpc('my_one_on_one')
-      .maybeSingle()
-      .then(({ data }) => {
-        const row = data as OneOnOne | null
-        setManagerFeedbackDue(row && !row.feedback_submitted_at ? row : null)
-      })
-    if (isHr) {
-      const { year, quarter } = quarterOf()
-      supabase
-        .from('peer_review_cycles')
-        .select('id')
-        .eq('year', year)
-        .eq('quarter', quarter)
-        .then(({ data, error }) => setNoPeerCycle(!error && !data?.length))
-    }
-    if (isManager)
-      supabase.rpc('performance_due', { p_period: currentCycle() }).then(({ data }) =>
-        setToSubmit(((data ?? []) as ReviewDue[]).filter((r) => r.manager_id === me && r.status !== 'submitted')),
-      )
-  }, [me, isManager, isHr])
-
-  if (!toSubmit.length && !toRead.length && !feedback && !peerToWrite.length && !noPeerCycle && !managerFeedbackDue)
-    return null
-  return (
-    <Stack spacing={1.5} sx={{ mb: 4 }}>
-      {toSubmit.length > 0 && (
-        <Alert
-          severity="warning"
-          action={
-            <Button component={Link} to="/performance?tab=team" color="inherit" size="small">
-              My team
-            </Button>
-          }
-        >
-          {toSubmit.length === 1 ? '1 monthly review' : `${toSubmit.length} monthly reviews`} of{' '}
-          {monthLabel(currentCycle())} to submit by {formatDate(toSubmit[0].due_date)}.
-        </Alert>
-      )}
-      {toRead.length > 0 && (
-        <Alert
-          severity="info"
-          action={
-            <Button
-              component={Link}
-              to={toRead.length === 1 ? `/performance/reviews/${toRead[0].id}` : '/performance'}
-              color="inherit"
-              size="small"
-            >
-              Read
-            </Button>
-          }
-        >
-          {toRead.length === 1
-            ? `Your ${monthLabel(toRead[0].period)} review is ready to read.`
-            : `${toRead.length} reviews are ready to read.`}
-        </Alert>
-      )}
-      {feedback > 0 && (
-        <Alert
-          severity="info"
-          action={
-            <Button component={Link} to="/performance" color="inherit" size="small">
-              Read
-            </Button>
-          }
-        >
-          {feedback === 1 ? 'You have new feedback from HR.' : `You have ${feedback} new pieces of feedback from HR.`}
-        </Alert>
-      )}
-      {peerToWrite.length > 0 && (
-        <Alert
-          severity="warning"
-          action={
-            <Button component={Link} to="/performance?tab=peer" color="inherit" size="small">
-              Peer reviews
-            </Button>
-          }
-        >
-          {peerToWrite.length === 1 ? '1 peer review' : `${peerToWrite.length} peer reviews`} to write, due by{' '}
-          {formatDate(peerToWrite[0].cycle!.due_date)}.
-        </Alert>
-      )}
-      {managerFeedbackDue && (
-        <Alert
-          severity="warning"
-          action={
-            <Button component={Link} to="/performance" color="inherit" size="small">
-              Give feedback
-            </Button>
-          }
-        >
-          Your {monthLabel(managerFeedbackDue.period)} 1:1: give feedback on {managerFeedbackDue.manager_name ?? 'your manager'}{' '}
-          by {formatDate(managerFeedbackDue.due_date)}.
-        </Alert>
-      )}
-      {noPeerCycle && (
-        <Alert
-          severity="warning"
-          action={
-            <Button component={Link} to="/performance?tab=cycles" color="inherit" size="small">
-              Peer cycles
-            </Button>
-          }
-        >
-          No peer reviews set up for {cycleLabel(quarterOf())} yet.
-        </Alert>
-      )}
-    </Stack>
   )
 }
 
@@ -326,96 +172,6 @@ function MyPerformance() {
   )
 }
 
-// Company admins: appraisals waiting for their approval (RLS leaves out
-// their own).
-function AppraisalNotice() {
-  const { isCompanyAdmin } = useAuth()
-  const [waiting, setWaiting] = useState(0)
-
-  useEffect(() => {
-    if (!isCompanyAdmin) return
-    supabase
-      .from('salary_revisions')
-      .select('id')
-      .eq('status', 'review')
-      .then(({ data }) => setWaiting(data?.length ?? 0))
-  }, [isCompanyAdmin])
-
-  if (!waiting) return null
-  return (
-    <Alert
-      severity="warning"
-      sx={{ mb: 4 }}
-      action={
-        <Button component={Link} to="/appraisals?status=review" color="inherit" size="small">
-          Appraisals
-        </Button>
-      }
-    >
-      {waiting === 1 ? '1 appraisal is' : `${waiting} appraisals are`} waiting for your approval.
-    </Alert>
-  )
-}
-
-// HR and managers: offboardings waiting for their sign-off, and (managers)
-// offboardings of their reports still under way.
-function OffboardingNotices() {
-  const { employee, isManager, isHr } = useAuth()
-  const me = employee!.id
-  const [rows, setRows] = useState<OffboardingListRow[]>([])
-  const [nodes, setNodes] = useState<OrgNode[]>([])
-
-  useEffect(() => {
-    if (!isHr && !isManager) return
-    Promise.all([
-      supabase.from('offboardings').select(OFFBOARDING_LIST).eq('status', 'in_progress'),
-      supabase.from('org_chart_nodes').select('employee_id, manager_id'),
-    ]).then(([offboardingsRes, nodesRes]) => {
-      setRows((offboardingsRes.data ?? []) as unknown as OffboardingListRow[])
-      setNodes((nodesRes.data ?? []) as OrgNode[])
-    })
-  }, [isHr, isManager])
-
-  const managerOf = (id: string) => nodes.find((n) => n.employee_id === id)?.manager_id ?? null
-  const toSign = rows.filter((r) => signOffOf(r, r.tasks, managerOf(r.employee_id), { id: me, isHr }).mine)
-  const team = isHr ? [] : rows.filter((r) => managerOf(r.employee_id) === me && !toSign.includes(r))
-  if (!toSign.length && !team.length) return null
-  return (
-    <Stack spacing={1.5} sx={{ mb: 4 }}>
-      {toSign.length > 0 && (
-        <Alert
-          severity="warning"
-          action={
-            <Button
-              component={Link}
-              to={toSign.length === 1 ? `/hr/offboarding/${toSign[0].id}` : '/hr/offboarding'}
-              color="inherit"
-              size="small"
-            >
-              Offboarding
-            </Button>
-          }
-        >
-          {toSign.length === 1 ? '1 offboarding is' : `${toSign.length} offboardings are`} waiting for your sign-off.
-        </Alert>
-      )}
-      {team.length > 0 && (
-        <Alert
-          severity="info"
-          action={
-            <Button component={Link} to="/hr/offboarding" color="inherit" size="small">
-              Offboarding
-            </Button>
-          }
-        >
-          {team.length === 1 ? 'Someone on your team is' : `${team.length} people on your team are`} leaving. Tick off
-          the handover tasks as they're done.
-        </Alert>
-      )}
-    </Stack>
-  )
-}
-
 export default function Dashboard() {
   const { employee } = useAuth()
   const me = employee!.id
@@ -471,9 +227,7 @@ export default function Dashboard() {
       )}
       {loading && <LinearProgress sx={{ mb: 3 }} />}
 
-      <PerformanceNotices />
-      <OffboardingNotices />
-      <AppraisalNotice />
+      <Todos />
 
       {/* Announcements and who's off side by side; stacked on a phone. */}
       {!loading && !error && (

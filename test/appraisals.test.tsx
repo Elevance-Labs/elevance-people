@@ -160,7 +160,8 @@ check('rejecting sends it back to draft with the reason',
 reset()
 signInAs(PEOPLE.hr)
 await mountApp('/dashboard')
-check('HR admins are not asked to approve', !text().includes('waiting for your approval'))
+check('HR admins are not asked to approve appraisals',
+  await waitFor(() => text().includes('To do')) && !document.querySelector('[data-todo="appraisals"]'))
 
 // ============================== the employee ==============================
 

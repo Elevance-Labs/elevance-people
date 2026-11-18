@@ -77,3 +77,20 @@ export function holidayError(error: { code?: string; message: string }) {
   if (error.code === '42501') return 'Only HR can change holidays.'
   return error.message
 }
+
+// Mirrors leave_decide: what the viewer's approval would add to a pending
+// leave. A company admin approves their own as HR and as manager at once; HR
+// may also re-approve to finish a leave whose employee no longer has a manager.
+export function leaveApprovalAs(
+  l: Pick<Leave, 'status' | 'employee_id' | 'hr_approved_by' | 'manager_approved_by'>,
+  managerId: string | null,
+  viewer: { id: string; isHr: boolean; isCompanyAdmin: boolean },
+) {
+  if (l.status !== 'pending') return { hr: false, manager: false }
+  if (l.employee_id === viewer.id)
+    return viewer.isCompanyAdmin ? { hr: !l.hr_approved_by, manager: !l.manager_approved_by } : { hr: false, manager: false }
+  return {
+    hr: viewer.isHr && (!l.hr_approved_by || !managerId),
+    manager: managerId === viewer.id && !l.manager_approved_by,
+  }
+}

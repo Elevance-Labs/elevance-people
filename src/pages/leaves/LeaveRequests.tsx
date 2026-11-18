@@ -35,6 +35,7 @@ import { LEAVE_STATUS_LABELS, formatDateRange, formatDays } from '../../lib/cons
 import {
   LEAVE_WITH_TYPE,
   calendarDays,
+  leaveApprovalAs,
   leaveError,
   remainingOf,
   thisYear,
@@ -104,20 +105,8 @@ export default function LeaveRequests() {
   const managerOf = useMemo(() => new Map(nodes.map((n) => [n.employee_id, n.manager_id])), [nodes])
   const nameOf = (id: string | null) => (id && byId.get(id)?.full_name) || 'a former employee'
 
-  // Mirrors leave_decide: what the caller's approval would add to a pending leave.
-  function approvalAs(l: LeaveWithType) {
-    if (l.status !== 'pending') return { hr: false, manager: false }
-    // A company admin approves their own as HR and as manager at once.
-    if (l.employee_id === me) {
-      return isCompanyAdmin ? { hr: !l.hr_approved_by, manager: !l.manager_approved_by } : { hr: false, manager: false }
-    }
-    const managerId = managerOf.get(l.employee_id) ?? null
-    return {
-      // HR may also re-approve to finish a leave whose employee no longer has a manager.
-      hr: isHr && (!l.hr_approved_by || !managerId),
-      manager: managerId === me && !l.manager_approved_by,
-    }
-  }
+  const approvalAs = (l: LeaveWithType) =>
+    leaveApprovalAs(l, managerOf.get(l.employee_id) ?? null, { id: me, isHr, isCompanyAdmin })
   const canApprove = (l: LeaveWithType) => {
     const as = approvalAs(l)
     return as.hr || as.manager

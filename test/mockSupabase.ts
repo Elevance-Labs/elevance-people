@@ -699,13 +699,13 @@ function withEmbeds(table: Table, row: Row): Row {
       return {
         ...row,
         employee: e ? { full_name: e.full_name, company_email: e.company_email, date_of_joining: e.date_of_joining } : null,
-        tasks: rowsIn('onboarding_tasks').filter((t) => t.onboarding_id === row.id).map((t) => ({ done_at: t.done_at })),
+        tasks: rowsIn('onboarding_tasks').filter((t) => t.onboarding_id === row.id).map((t) => ({ ...t })),
       }
     }
     case 'offboardings':
       return {
         ...row,
-        tasks: rowsIn('offboarding_tasks').filter((t) => t.offboarding_id === row.id).map((t) => ({ done_at: t.done_at })),
+        tasks: rowsIn('offboarding_tasks').filter((t) => t.offboarding_id === row.id).map((t) => ({ ...t })),
       }
     case 'announcements':
       return { ...row, author: row.created_by ? { full_name: find('employees', row.created_by)?.full_name } : null }
