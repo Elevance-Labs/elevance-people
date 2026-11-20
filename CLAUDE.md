@@ -460,8 +460,9 @@ Full detail in `supabase/schema.sql`.
   manager). `stage` (enum, starts `new`) changes only via
   `application_move` (allowed steps in `application_next_stages`; text
   required per `application_stage_needs_reason`), `application_hire` (to
-  hired) and HR's `application_undo`. Visible to HR, and to the hiring team from shortlisted
+  hired) and HR's `application_undo`. Visible to HR, and to the hiring team from screened
   through cleared (`can_see_application`); the team moves only out of
+  screened (to shortlisted or rejected, `application_team_next_stages`),
   shortlisted, test and interviews. `application_stage_events` is the
   timeline (moves and undos, undone moves kept); a move on from the test
   carries its score, one on from an interview a 1–5 rating per question

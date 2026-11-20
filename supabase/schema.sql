@@ -2063,13 +2063,24 @@ $$;
 -- The stages the hiring team sees.
 create function public.application_team_stage(p_stage public.application_stage)
 returns boolean language sql immutable set search_path = '' as $$
-  select p_stage in ('shortlisted', 'test', 'interview_1', 'interview_2', 'interview_3', 'cleared');
+  select p_stage in ('screened', 'shortlisted', 'test', 'interview_1', 'interview_2', 'interview_3', 'cleared');
 $$;
 
 -- The stages the hiring team may move an application out of.
 create function public.application_team_movable(p_stage public.application_stage)
 returns boolean language sql immutable set search_path = '' as $$
-  select p_stage in ('shortlisted', 'test', 'interview_1', 'interview_2', 'interview_3');
+  select p_stage in ('screened', 'shortlisted', 'test', 'interview_1', 'interview_2', 'interview_3');
+$$;
+
+-- Where the hiring team may move an application from a stage: the next
+-- stages, except that from screened they only shortlist or reject (HR then
+-- sets up the test or interview).
+create function public.application_team_next_stages(p_stage public.application_stage)
+returns public.application_stage[] language sql immutable set search_path = '' as $$
+  select case p_stage
+    when 'screened' then array['shortlisted', 'rejected']::public.application_stage[]
+    else public.application_next_stages(p_stage)
+  end;
 $$;
 
 -- The caller is the job's hiring manager or one of its interviewers.
@@ -2249,6 +2260,9 @@ begin
   end if;
   if not p_stage = any (public.application_next_stages(v_app.stage)) then
     raise exception 'An application can''t move from % to %.', v_app.stage, p_stage;
+  end if;
+  if not public.is_hr() and not p_stage = any (public.application_team_next_stages(v_app.stage)) then
+    raise exception 'Only HR can move an application from % to %.', v_app.stage, p_stage using errcode = '42501';
   end if;
   if p_stage = 'hired' then
     raise exception 'Hire through application_hire, which creates the employee record.';
@@ -4341,6 +4355,7 @@ revoke execute on function
   public.application_stage_needs_reason(public.application_stage),
   public.application_team_stage(public.application_stage),
   public.application_team_movable(public.application_stage),
+  public.application_team_next_stages(public.application_stage),
   public.is_hiring_team(uuid), public.on_hiring_team(),
   public.can_see_application(uuid, public.application_stage), public.application_hr_details(uuid),
   public.application_set_hr_details(uuid, integer, text, text, text, integer, text),
@@ -4397,6 +4412,7 @@ grant execute on function
   public.application_stage_needs_reason(public.application_stage),
   public.application_team_stage(public.application_stage),
   public.application_team_movable(public.application_stage),
+  public.application_team_next_stages(public.application_stage),
   public.is_hiring_team(uuid), public.on_hiring_team(),
   public.can_see_application(uuid, public.application_stage), public.application_hr_details(uuid),
   public.application_set_hr_details(uuid, integer, text, text, text, integer, text),

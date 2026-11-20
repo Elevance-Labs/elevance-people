@@ -683,10 +683,15 @@ table('application_test_files').push({
   id: 'tf-int', application_id: 'a-int', storage_path: 'a-int/1111.pdf', file_name: 'take-home.pdf',
   uploaded_by: 'e-bilal', created_at: '2026-05-21T09:00:00Z',
 })
+table('job_applications').push({
+  id: 'a-screen', job_opening_id: 'j-open', full_name: 'Omar Farooq', email: 'a-screen@example.com', phone: '0300 1112223',
+  expected_salary: 220000, current_salary: null, hr_notes: null, note: null, resume_path: 'j-open/a-screen.pdf',
+  resume_name: 'CV.pdf', created_at: '2026-05-10T09:00:00Z', stage: 'screened', stage_changed_at: '2026-05-20T09:00:00Z',
+})
 await mountApp('/applications?job=j-open')
 check('only HR adds applications', !button('Add application'))
-check('an interviewer sees only shortlisted through cleared', columnLabels().join() ===
-  'Shortlisted,Test,Interview 1,Interview 2,Interview 3,Cleared', columnLabels().join())
+check('an interviewer sees only screened through cleared', columnLabels().join() ===
+  'Screened,Shortlisted,Test,Interview 1,Interview 2,Interview 3,Cleared', columnLabels().join())
 await openCard('Ayesha Noor')
 await waitFor(() => captured.rpcs.some((r) => r.name === 'application_hr_details'))
 check('an interviewer doesn’t see the salaries, the current benefits or HR’s notes',
@@ -750,6 +755,20 @@ await waitFor(() => !dialog())
 await openCard('Fatima Shah')
 check('from cleared only HR moves it on', !field('Move to', dialog()!) &&
   dialog()!.textContent!.includes('Only HR can move an application on from Cleared.'))
+await click(button('Close', dialog()!))
+await waitFor(() => !dialog())
+await openCard('Omar Farooq')
+await openMoveTo()
+check('from screened the hiring team only shortlists or rejects (HR sets up the test)',
+  options().map((o) => o.textContent).join() === 'Shortlisted,Rejected', options().map((o) => o.textContent).join())
+await click(options().find((o) => o.textContent === 'Shortlisted'))
+await click(button('Move', dialog()!))
+check('…and shortlisting goes through application_move',
+  JSON.stringify(captured.rpcs.filter((r) => r.name === 'application_move').at(-1)?.args) ===
+    JSON.stringify({ p_application_id: 'a-screen', p_stage: 'shortlisted', p_reason: null }),
+  JSON.stringify(captured.rpcs.filter((r) => r.name === 'application_move')))
+check('…the card moves to Shortlisted', await waitFor(() => column('Shortlisted')?.textContent?.includes('Omar Farooq') &&
+  !column('Screened')?.textContent?.includes('Omar Farooq')))
 
 // ---------------- test score, then interview scores ----------------
 reset()

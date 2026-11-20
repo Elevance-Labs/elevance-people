@@ -53,6 +53,7 @@ import {
   NEXT_STAGES,
   attachTestFile,
   canMoveFrom,
+  nextStagesFor,
   hireError,
   interviewScores,
   needsTestFile,
@@ -532,7 +533,7 @@ export default function ApplicationDialog({
                 onChange={(e) => setTo(e.target.value as ApplicationStage)}
                 fullWidth
               >
-                {NEXT_STAGES[a.stage].map((s) => (
+                {nextStagesFor(a.stage, isHr).map((s) => (
                   <MenuItem key={s} value={s}>
                     {STAGE_LABELS[s]}
                   </MenuItem>

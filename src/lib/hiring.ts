@@ -111,11 +111,22 @@ export const NEEDS_REASON: ApplicationStage[] = ['shelf', 'rejected', 'declined'
 
 // What a job's hiring manager and interviewers see (application_team_stage)
 // and may move an application out of (application_team_movable).
-export const TEAM_STAGES: ApplicationStage[] = ['shortlisted', 'test', 'interview_1', 'interview_2', 'interview_3', 'cleared']
-export const TEAM_MOVABLE: ApplicationStage[] = ['shortlisted', 'test', 'interview_1', 'interview_2', 'interview_3']
+export const TEAM_STAGES: ApplicationStage[] = [
+  'screened', 'shortlisted', 'test', 'interview_1', 'interview_2', 'interview_3', 'cleared',
+]
+export const TEAM_MOVABLE: ApplicationStage[] = ['screened', 'shortlisted', 'test', 'interview_1', 'interview_2', 'interview_3']
+
+// Where the viewer may move an application from a stage. Mirrors
+// application_team_next_stages: from screened the team only shortlists or
+// rejects; HR sets up the test or interview.
+export function nextStagesFor(stage: ApplicationStage, isHr: boolean): ApplicationStage[] {
+  if (isHr) return NEXT_STAGES[stage]
+  if (!TEAM_MOVABLE.includes(stage)) return []
+  return stage === 'screened' ? ['shortlisted', 'rejected'] : NEXT_STAGES[stage]
+}
 
 export function canMoveFrom(stage: ApplicationStage, isHr: boolean) {
-  return NEXT_STAGES[stage].length > 0 && (isHr || TEAM_MOVABLE.includes(stage))
+  return nextStagesFor(stage, isHr).length > 0
 }
 
 // The move an undo would reverse: the latest one not yet undone, if it led to
