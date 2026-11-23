@@ -94,6 +94,8 @@ check('signed in by password, the session is still bound like any other',
   captured.rpcs.some((r) => r.name === 'bind_employee') && (await waitFor(() => location.pathname === '/dashboard')),
   location.pathname)
 check('…and the app shows them with their role', text().includes('Hina Raza') && text().includes('Finance Admin'))
+check('…a fresh sign-in asks about direct reports only once bound, by their own id',
+  captured.selects.find((s) => s.table === 'org_chart_nodes')?.filters.some((f) => f[0] === 'manager_id'))
 
 await click(button('Account menu'))
 await click([...document.querySelectorAll('[role="menuitem"]')].find((m) => m.textContent?.includes('Change password')))
@@ -184,6 +186,19 @@ check('…and is offered it and their reports\' onboarding and offboarding, but 
   navLabels().join() ===
     'Dashboard,Handbook,Resources,Profile,My leaves,Org chart,Performance,Leave requests,Onboarding,Offboarding',
   navLabels().join())
+check('…asked beside bind_employee, a restored session reads every manager in the org chart',
+  captured.selects.find((s) => s.table === 'org_chart_nodes')?.filters.length === 0)
+
+reset()
+offHiringTeam()
+table('org_chart_nodes').push({ employee_id: 'e-omar', manager_id: 'e-sara' })
+signInAs(PEOPLE.member)
+failNext('org_chart_nodes.select', { message: 'flaky' })
+await mountApp('/leaves/requests')
+check('an early read that failed is asked again once bound, by their own id',
+  location.pathname === '/leaves/requests' &&
+    captured.selects.some((s) => s.table === 'org_chart_nodes' && s.filters.some((f) => f[0] === 'manager_id' && f[2] === 'e-sara')),
+  location.pathname)
 
 // ---------------- a member on a job's hiring team ----------------
 reset()

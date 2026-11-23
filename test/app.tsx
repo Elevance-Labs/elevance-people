@@ -10,6 +10,7 @@ import {
 } from 'react-router-dom'
 import { CssBaseline, ThemeProvider } from '@mui/material'
 import App from '../src/App'
+import { preloadAllPages } from '../src/lazyPages'
 import { AuthProvider } from '../src/auth/AuthProvider'
 import { theme, themeSettings } from '../src/theme'
 import { settle, trackNavigation } from './setup'
@@ -35,6 +36,9 @@ function LocationProbe() {
 
 export async function mountApp(path = '/') {
   root?.unmount()
+  // Pages are lazy chunks: load them all first, so no check runs while one is
+  // still arriving (once loaded, a lazy page shows without a pause).
+  await preloadAllPages()
   document.body.innerHTML = '<div id="root"></div>'
   // v5Compat, as MemoryRouter does: otherwise a push doesn't tell the router.
   const history = createMemoryHistory({ initialEntries: [path], v5Compat: true })

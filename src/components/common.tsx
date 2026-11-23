@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -29,6 +30,15 @@ export function Logo({ size = 32 }: { size?: number }) {
     <Avatar variant="rounded" sx={{ width: size, height: size, bgcolor: '#00796b' }}>
       <PeopleIcon sx={{ fontSize: size * 0.62 }} />
     </Avatar>
+  )
+}
+
+/** A page's own first load, inside the shell. */
+export function Loading({ minHeight = 200 }: { minHeight?: number }) {
+  return (
+    <Box sx={{ display: 'grid', placeItems: 'center', minHeight }}>
+      <CircularProgress />
+    </Box>
   )
 }
 

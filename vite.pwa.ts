@@ -36,8 +36,12 @@ export interface PwaOptions {
  *     the page asks for it (`skip-waiting`, sent from the "new version"
  *     prompt) or every tab has closed. The one exception is a version that
  *     is serving a page it cannot load: that is replaced at once.
- *   - It never prefers its stored page to the real one. A page load goes to
- *     the network first; the stored page is for when there is no network.
+ *   - It opens the app from its own copy. A page load is answered from this
+ *     version's stored page, with the scripts stored beside it, so the app
+ *     starts without waiting on the host. A deploy arrives as a new worker
+ *     (the browser checks sw.js as pages load, and the app asks again
+ *     whenever it comes to the front), which the "new version" prompt
+ *     offers. The network answers only when nothing is stored.
  *
  * `passthrough` lists path prefixes (relative to the app's folder) whose page
  * loads are left to the network: public pages that must never be served a
@@ -81,7 +85,8 @@ export function pwa({ id, name, shortName, description, themeColor, backgroundCo
       // './' is index.html, the answer to every page load inside the app.
       const built = Object.keys(bundle).filter((f) => f !== 'index.html' && !f.endsWith('.map'))
       const files = ['./', ...built, ...icons, 'manifest.webmanifest']
-      const html = bundle['index.html']?.source ?? ''
+      const index = bundle['index.html']
+      const html = index && 'source' in index ? index.source : ''
       const version = createHash('sha256')
         .update(JSON.stringify(files)).update(String(html)).update(JSON.stringify(manifest))
         .digest('hex').slice(0, 12)
@@ -157,15 +162,13 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     if (PASSTHROUGH.some((prefix) => path.startsWith(prefix))) return
-    // The page itself is asked of the network first, revalidated rather than
-    // reused, so a deploy shows on the next load and a stored page is never
-    // preferred to the real one. The stored copy answers when there is no
-    // network, and for an address the host has no file for (a deep link).
-    const stored = () => caches.open(CACHE).then((cache) => cache.match(scope))
+    // The page itself comes from this version's copy, at once: it names only
+    // scripts stored with it, and a new version arrives as a new worker and
+    // its prompt. Only with nothing stored (the cache was cleared) does it go
+    // to the network, revalidated rather than reused.
     event.respondWith(
-      fetch(request.url, { cache: 'no-cache' })
-        .then((response) => (response.ok ? response : stored().then((hit) => hit || response)))
-        .catch(() => stored().then((hit) => hit || Response.error())))
+      caches.open(CACHE).then((cache) => cache.match(scope)).then((hit) =>
+        hit || fetch(request.url, { cache: 'no-cache' }).catch(() => Response.error())))
     return
   }
   event.respondWith(

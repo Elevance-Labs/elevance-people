@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from 'react'
+import { Suspense, useEffect, useState, type ReactElement } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import {
   AppBar,
@@ -63,7 +63,7 @@ import { PASSWORD_MIN_LENGTH } from '../lib/passwordLogin'
 import { supabase } from '../lib/supabase'
 import AppSwitcher from './AppSwitcher'
 import { useNavCollapsed } from './useNavCollapsed'
-import { FormDialog, Logo, PersonAvatar } from './common'
+import { FormDialog, Loading, Logo, PersonAvatar } from './common'
 import { InstallBanner, InstallNavButton } from './InstallApp'
 import ThemeModeSwitch from './ThemeModeSwitch'
 
@@ -409,7 +409,10 @@ export default function Layout() {
 
       <Box component="main" sx={{ flexGrow: 1, minWidth: 0, p: { xs: 2, md: 3 } }}>
         <Toolbar />
-        <Outlet />
+        {/* A page's first showing loads its chunk; the shell stays put. */}
+        <Suspense fallback={<Loading />}>
+          <Outlet />
+        </Suspense>
       </Box>
 
       {(changingPassword || recovering) && (

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { COMPANY_DOMAIN } from '../lib/constants'
 import { SSO_PARAM, ssoHint } from '../lib/suite'
@@ -60,6 +60,48 @@ function takeSsoHint(): string | null {
 const handedOver = takeSsoHint()
 let handOverStarted = false
 
+// Back from Google (or a reset link) with a code to exchange: a fresh
+// sign-in, whose employee row may be bound only now. Read as the module
+// loads, before the exchange takes the code out of the address.
+const signingIn = new URLSearchParams(window.location.search).has('code')
+
+interface Roles {
+  isManager: boolean
+  isHiringTeam: boolean
+}
+
+// Whether you have direct reports, and whether you are on any job's hiring team.
+async function readRoles(employeeId: string): Promise<Roles> {
+  const [reports, hiring] = await Promise.all([
+    supabase
+      .from('org_chart_nodes')
+      .select('employee_id', { count: 'exact', head: true })
+      .eq('manager_id', employeeId),
+    supabase.rpc('on_hiring_team'),
+  ])
+  return { isManager: !!reports.count, isHiringTeam: hiring.data === true }
+}
+
+// PostgREST's page: an unfiltered read this long may have been cut short.
+const PAGE = 1000
+
+// The same, asked beside bind_employee, before your id is known: the whole
+// org chart's managers, to look yourself up in once bound. It stands only if
+// read as a bound employee: the org chart is hidden until then, so an empty
+// one (or an error) means read again.
+async function readRolesEarly(): Promise<((employeeId: string) => Roles) | null> {
+  const [nodes, hiring] = await Promise.all([
+    supabase.from('org_chart_nodes').select('manager_id'),
+    supabase.rpc('on_hiring_team'),
+  ])
+  const managers = (nodes.data ?? []) as { manager_id: string | null }[]
+  if (nodes.error || hiring.error || managers.length === 0 || managers.length >= PAGE) return null
+  return (employeeId) => ({
+    isManager: managers.some((n) => n.manager_id === employeeId),
+    isHiringTeam: hiring.data === true,
+  })
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
@@ -70,12 +112,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(readOAuthError)
   const [handOverFailed, setHandOverFailed] = useState(false)
   const [recovering, setRecovering] = useState(false)
+  // Whether the current session was restored from this device (every normal
+  // opening), not just signed in: only then are the roles read beside
+  // bind_employee, since the row was bound on an earlier visit. A first
+  // sign-in binds now, and reads raced against that could miss it.
+  const sessionUser = useRef<string | null>(null)
+  const restored = useRef(false)
 
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') setRecovering(true)
       if (event === 'SIGNED_OUT') setRecovering(false)
-      setUserId(session?.user.id ?? null)
+      const uid = session?.user.id ?? null
+      if (uid !== sessionUser.current) {
+        sessionUser.current = uid
+        restored.current = event === 'INITIAL_SESSION' && !signingIn
+      }
+      setUserId(uid)
       setSessionReady(true)
     })
     return () => data.subscription.unsubscribe()
@@ -115,6 +168,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false
     setBinding(true)
+    // A restored session asks for the roles at the same time, not after.
+    const early = restored.current ? readRolesEarly().catch(() => null) : null
     supabase
       .rpc('bind_employee')
       .maybeSingle()
@@ -124,16 +179,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setError(rpcError ? `Could not verify your account: ${rpcError.message}` : NOT_ALLOWED)
           await supabase.auth.signOut()
         } else {
-          const [reports, hiring] = await Promise.all([
-            supabase
-              .from('org_chart_nodes')
-              .select('employee_id', { count: 'exact', head: true })
-              .eq('manager_id', (data as Employee).id),
-            supabase.rpc('on_hiring_team'),
-          ])
+          const id = (data as Employee).id
+          const roles = (await early)?.(id) ?? (await readRoles(id))
           if (cancelled) return
-          setIsManager(!!reports.count)
-          setIsHiringTeam(hiring.data === true)
+          setIsManager(roles.isManager)
+          setIsHiringTeam(roles.isHiringTeam)
           setEmployee(data as Employee)
         }
         setBinding(false)

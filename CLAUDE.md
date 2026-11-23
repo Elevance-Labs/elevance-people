@@ -130,10 +130,12 @@ behaviour).
   a dismissible banner atop the phone navigation): the browser's dialog where
   it has one, else steps from `lib/install.ts`; hidden when running installed. The worker caches the
   app's own files only, **never a Supabase response**, and stays inside its
-  own folder (sibling apps share the origin). Not registered on the public
-  job page (`#/careers`). Icons in `public/icons/`.
+  own folder (sibling apps share the origin). A page load is answered from
+  the stored build (the network only when nothing is stored), so a deploy
+  reaches people through `UpdatePrompt`: see §10 on migrations. Not
+  registered on the public job page (`#/careers`). Icons in `public/icons/`.
 - **The built page locks itself down.** A Content Security Policy is added at
-  build time (`vite.config.ts`) and the app refuses to run framed
+  build time (`vite.config.ts`, which also preconnects to Supabase) and the app refuses to run framed
   (`main.tsx`). A new external host (API, iframe, image, font) is added to
   that policy; `script-src` is never widened. No `console` in `src/` (lint).
 - **Column-level grants are the write allow-list.** A new column on a writable
@@ -144,7 +146,7 @@ behaviour).
 
 | Path | Role |
 |---|---|
-| `src/pages/` | One file per route. Fetches its own data, owns page state. |
+| `src/pages/` | One file per route. Fetches its own data, owns page state. Every page but the Dashboard loads as its own chunk (`src/lazyPages.ts`, through `components/lazyPage`: reloads once if a deploy removed a chunk; everyone's own pages are preloaded when idle). |
 | `src/pages/home/` | Dashboard, handbook, resources, profile — everyone. |
 | `src/pages/company/` | Company settings pages (company admins; the KPIs, Expectations, Leaves, Holidays and Announcements pages also HR). |
 | `src/pages/leaves/` | Leaves pages: own leaves, requests to approve. |
@@ -157,7 +159,7 @@ behaviour).
 | `src/pages/public/` | Pages served without sign-in (the careers list and the public job page). |
 | `src/components/` | Shared UI: app shell (with `ThemeModeSwitch`, light / dark / system), documents panel, rich text, small common pieces. |
 | `src/theme.ts` | MUI theme (light and dark), its provider settings, `readableInk`, and the branded (always light) variant the public page uses. |
-| `src/auth/` | `AuthProvider` — session, employee binding, role flags. |
+| `src/auth/` | `AuthProvider` — session, employee binding, role flags (on a session restored from the device, asked beside `bind_employee`; after it on a fresh sign-in). |
 | `src/lib/` | Supabase client, domain types, constants/formatters, company-config helpers. |
 | `supabase/migrations/` | Ordered, timestamped changes, applied by `supabase db push`. |
 | `supabase/functions/` | Edge Functions (Deno), deployed by hand with `supabase functions deploy`; the only code that holds the service role key. |
@@ -637,7 +639,10 @@ Full detail in `supabase/schema.sql`.
   (user made by a company admin's *Set password*, via `set-password`) →
   `AuthProvider` sees a
   session → RPC `bind_employee` links auth user ↔ employee by company email
-  and method → app renders with role flags. A reset link (PKCE, same
+  and method → app renders with role flags (direct reports, hiring team).
+  A session restored from the device asks for those beside `bind_employee`
+  (the whole org chart's managers, kept only if read as a bound employee);
+  a fresh sign-in, which may be binding for the first time, asks after it. A reset link (PKCE, same
   browser) signs in and fires `PASSWORD_RECOVERY` → set a new password.
 - Document upload: storage upload → `employee_documents` insert (trigger stamps
   `uploaded_by`). Delete in the app = set `deleted_at` (trigger stamps
@@ -709,7 +714,8 @@ Full detail in `supabase/schema.sql`.
     `failNext` to inject database errors. It does **not** enforce RLS,
     grants or triggers — the SQL does.
   - `test/app.tsx` mounts the real app (AuthProvider + routes) at a path as a
-    signed-in fixture person; `test/setup.ts` has jsdom and the
+    signed-in fixture person, having loaded every lazy page first (a new one
+    goes in `preloadAllPages`); `test/setup.ts` has jsdom and the
     click/type/choose helpers. Leave tests freeze today to the mock's date.
   - Tests are **behavioural**: who is offered what, and exactly what is sent.
     Add to them when changing a rule, a role boundary or a write.
@@ -723,7 +729,10 @@ Every schema change is **three edits in the same change**:
 
 1. A **new migration** in `supabase/migrations/`, named
    `YYYYMMDDHHMMSS_<what>.sql`, opening with a comment that says what changes
-   and why. Never edit a migration that has shipped.
+   and why. Never edit a migration that has shipped. It must keep the
+   **previous build** working: the installed app opens from its stored build
+   until someone takes the update. Add first; drop or rename what the old
+   build reads in a later change.
 2. The **same end state folded into `supabase/schema.sql`** — edit the table,
    function, grant or policy where it lives, as if it had always been that
    way. One-off data moves (backfills, renames of values) stay in the

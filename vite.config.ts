@@ -28,6 +28,10 @@ function contentSecurityPolicy(supabaseUrl: string | undefined): Plugin {
     apply: 'build',
     transformIndexHtml: () => [
       { tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy', content: policy }, injectTo: 'head-prepend' },
+      // Open the connection to Supabase (DNS, TLS) while the scripts load and
+      // parse, rather than at the first request. crossorigin: the app's
+      // requests to it are CORS without cookies, and use that connection.
+      ...(supabase ? [{ tag: 'link', attrs: { rel: 'preconnect', href: supabase, crossorigin: 'anonymous' }, injectTo: 'head' as const }] : []),
     ],
   }
 }
@@ -49,4 +53,20 @@ export default defineConfig(({ mode }) => ({
       backgroundColor: '#f6f7fb',
     }),
   ],
+  build: {
+    rolldownOptions: {
+      output: {
+        // React and MUI are big and change rarely: their own chunks cache well
+        // across deploys. A group takes its modules' dependencies along, so
+        // React, which MUI depends on, is claimed first. (The editor and the
+        // PDF maker are already split off: only lazily loaded code imports them.)
+        codeSplitting: {
+          groups: [
+            { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom)[\\/]/, priority: 2 },
+            { name: 'mui', test: /node_modules[\\/](@mui|@emotion)[\\/]/, priority: 1 },
+          ],
+        },
+      },
+    },
+  },
 }))
