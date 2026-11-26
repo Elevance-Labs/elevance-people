@@ -236,7 +236,7 @@ behaviour).
 - `/jobs`, `/jobs/new`, `/jobs/:id` — HR: job openings; the form (with the
   rich text editor) is lazy-loaded.
 - `/applications` — HR and hiring teams: one job's board (`?job=` required,
-  defaults to the first), open application in `?application=`; HR also
+  defaults to the one last picked on the device, else the first), open application in `?application=`; HR also
   *Add application* (`AddApplicationDialog`) for a CV received elsewhere.
 - `/hr/onboarding` — HR and managers (RLS: their reports'): onboardings by
   status (`?status=`, in progress by default). `/hr/onboarding/:id` — one

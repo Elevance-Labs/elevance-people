@@ -34,6 +34,24 @@ type Job = {
 
 const COLUMN_WIDTH = 272
 
+// The job last shown on the board, kept in this browser only. Storage can be
+// refused (private windows); the board then starts on the first job.
+const LAST_JOB = 'el-people:applications-job'
+function readLastJob() {
+  try {
+    return window.localStorage.getItem(LAST_JOB)
+  } catch {
+    return null
+  }
+}
+function writeLastJob(id: string) {
+  try {
+    window.localStorage.setItem(LAST_JOB, id)
+  } catch {
+    // Not remembered this time.
+  }
+}
+
 // The viewport less the app bar (theme toolbar heights) and the layout's
 // padding above and below, so the board fills the page and only the columns
 // scroll.
@@ -80,10 +98,18 @@ export default function Applications() {
     })
   }, [])
 
-  // A job is always selected: the one in the URL, or the first.
+  // A job is always selected: the one in the URL, else the one last picked on
+  // this device, else the first.
   useEffect(() => {
-    if (jobs?.length && !jobs.some((j) => j.id === jobId)) setQuery(jobs[0].id, null)
+    if (!jobs?.length || jobs.some((j) => j.id === jobId)) return
+    const last = readLastJob()
+    setQuery(jobs.some((j) => j.id === last) ? last! : jobs[0].id, null)
   }, [jobs, jobId, setQuery])
+
+  // Remember the job on show for next time.
+  useEffect(() => {
+    if (jobId && jobs?.some((j) => j.id === jobId)) writeLastJob(jobId)
+  }, [jobId, jobs])
 
   const load = useCallback(async (job: string) => {
     setLoading(true)

@@ -470,7 +470,7 @@ signInAs(PEOPLE.hr)
 await mountApp('/applications')
 check('a job is always selected: the open one first', location.search === '?job=j-open', location.search)
 check('HR sees a column for every stage, in order', columnLabels().join() ===
-  'New,Screened,Shortlisted,Test,Interview 1,Interview 2,Interview 3,Cleared,Shelf,Offer sent,Hired,Rejected,Abandoned,Declined',
+  'New,Screened,Shortlisted,Test,Interview 1,Interview 2,Interview 3,Cleared,Offer sent,Hired,Shelf,Rejected,Abandoned,Declined',
   columnLabels().join())
 check('…with each application in its stage',
   column('New')?.textContent?.includes('Zara Malik') && column('Shortlisted')?.textContent?.includes('Hamza Ali') &&
@@ -585,6 +585,16 @@ check('closing drops the application from the URL', location.search === '?job=j-
 await choose('Job', 'HR Intern · Draft')
 check('switching job loads that job’s board', location.search === '?job=j-draft' &&
   captured.selects.filter((x) => x.table === 'job_applications').at(-1)?.filters[0]?.[2] === 'j-draft')
+check('…and is remembered on this device', window.localStorage.getItem('el-people:applications-job') === 'j-draft')
+await mountApp('/applications')
+check('the board opens on the job last picked here', location.search === '?job=j-draft', location.search)
+await mountApp('/applications?job=j-open')
+check('a job in the link wins, and is remembered in turn',
+  location.search === '?job=j-open' && window.localStorage.getItem('el-people:applications-job') === 'j-open')
+window.localStorage.setItem('el-people:applications-job', 'j-gone')
+await mountApp('/applications')
+check('a remembered job that’s no longer there falls back to the first', location.search === '?job=j-open', location.search)
+window.localStorage.removeItem('el-people:applications-job')
 
 // ---------------- HR adds an application received elsewhere ----------------
 reset()
