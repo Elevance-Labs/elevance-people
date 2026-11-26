@@ -181,7 +181,7 @@ behaviour).
   (`components/Todos.tsx`, builders in `lib/todos.ts`: performance reminders,
   leave to approve, claims to approve / process / disburse, one nudge per
   onboarding / offboarding section left — a department's to the manager in
-  it, the rest to HR — offboarding details and sign-off, the payroll's next
+  it, the rest to HR — offboarding details and sign-off, each open payroll's next
   step and a start nudge from the 25th, appraisals to approve; hidden when
   empty), own scores (*My performance*: performance, KPI and
   expectation scores, each KPI's and expectation's average over own submitted
@@ -511,8 +511,8 @@ Full detail in `supabase/schema.sql`.
   terminated) and date of separation. Visible via `can_work_offboarding`:
   HR and the manager, never the employee. No client writes. Cascades away
   with the employee.
-- `payrolls` — one per month and year, never deleted (no grant), at most one
-  not yet disbursed (partial unique index). Status `draft` → `review` →
+- `payrolls` — one per month and year (any status), never deleted (no
+  grant); any number may be open at once. Status `draft` → `review` →
   `approved` → `processed` → `disbursed` only via `payroll_move` (approve
   and back to draft: company admin; processed and disbursed: finance);
   `payroll_create` adds everyone

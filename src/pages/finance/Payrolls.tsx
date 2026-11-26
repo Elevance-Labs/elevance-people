@@ -32,11 +32,9 @@ import {
   type PayrollListRow,
 } from '../../lib/payroll'
 
-const OPEN_STATUS_TEXT = { draft: 'a draft', review: 'in review', approved: 'approved', processed: 'processed' }
-
 // Finance → Payroll (HR, finance admins, company admins): one payroll per
-// month, newest first. A new one starts with everyone who can be paid; only
-// one may be open (not yet disbursed) at a time. A row opens the payroll.
+// month and year, newest first. A new one starts with everyone who can be
+// paid; any number may be open at once. A row opens the payroll.
 export default function Payrolls() {
   const navigate = useNavigate()
   const [rows, setRows] = useState<PayrollListRow[]>([])
@@ -51,14 +49,14 @@ export default function Payrolls() {
     supabase
       .from('payrolls')
       .select(PAYROLL_LIST)
+      .order('year', { ascending: false })
+      .order('month', { ascending: false })
       .then(({ data, error: loadError }) => {
         if (loadError) setError(loadError.message)
         else setRows((data as unknown as PayrollListRow[]).sort(byPeriodDesc))
         setLoading(false)
       })
   }, [])
-
-  const open = rows.find((r) => r.status !== 'disbursed')
 
   // Suggests the month after the latest payroll, or this month for the first.
   function startCreating() {
@@ -95,7 +93,7 @@ export default function Payrolls() {
         title="Payroll"
         subtitle="One payroll per month. It starts with everyone on probation, active or on their notice period."
         actions={
-          <Button variant="contained" startIcon={<AddIcon />} disabled={loading || !!open} onClick={startCreating}>
+          <Button variant="contained" startIcon={<AddIcon />} disabled={loading} onClick={startCreating}>
             New payroll
           </Button>
         }
@@ -104,12 +102,6 @@ export default function Payrolls() {
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
-        </Alert>
-      )}
-      {open && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          The {periodLabel(open)} payroll is {OPEN_STATUS_TEXT[open.status as keyof typeof OPEN_STATUS_TEXT]}. It
-          must be disbursed before another is started.
         </Alert>
       )}
 
@@ -174,7 +166,7 @@ export default function Payrolls() {
         onClose={() => setCreating(false)}
       >
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-          Everyone on probation, active or on their notice period is added. Basic salary, contractual amount and
+          A month that already has a payroll can’t be picked. Everyone on probation, active or on their notice period is added. Basic salary, contractual amount and
           allowance carry over from each person’s latest earlier payroll.
         </Typography>
         <Stack direction="row" spacing={2}>
@@ -187,7 +179,11 @@ export default function Payrolls() {
             onChange={(e) => setPeriod((p) => ({ ...p, month: Number(e.target.value) }))}
           >
             {MONTHS.map((name, i) => (
-              <MenuItem key={name} value={i + 1}>
+              <MenuItem
+                key={name}
+                value={i + 1}
+                disabled={rows.some((r) => r.year === period.year && r.month === i + 1)}
+              >
                 {name}
               </MenuItem>
             ))}

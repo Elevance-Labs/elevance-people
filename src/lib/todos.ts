@@ -238,35 +238,41 @@ export function offboardingTodos(
 
 // ------------------------------- payroll -------------------------------
 
-// The open payroll's next step if it's the viewer's (as payroll_move), and,
-// from PAYROLL_START_DAY with none open, starting this month's.
+// Each open payroll's next step if it's the viewer's (as payroll_move),
+// oldest first, and, from PAYROLL_START_DAY, starting this month's if it has
+// none.
 export function payrollTodos(
   payrolls: Pick<Payroll, 'id' | 'year' | 'month' | 'status'>[],
   viewer: TodoViewer,
   today = todayIso(),
 ): Todo[] {
   if (!viewer.canManagePayroll) return []
-  const open = payrolls.find((p) => p.status !== 'disbursed')
-  if (open) {
-    const label = periodLabel(open)
-    const text =
-      open.status === 'draft'
-        ? `The ${label} payroll is a draft. Send it for review when it’s ready.`
-        : open.status === 'review' && viewer.isCompanyAdmin
-          ? `The ${label} payroll is waiting for your approval.`
-          : open.status === 'approved' && viewer.isFinance
-            ? `The ${label} payroll is approved. Mark it processed.`
-            : open.status === 'processed' && viewer.isFinance
-              ? `The ${label} payroll is processed. Mark it disbursed once salaries are paid.`
-              : null
-    return text ? [{ key: 'payroll', area: 'payroll', text, to: `/finance/payroll/${open.id}`, action: 'Payroll' }] : []
-  }
+  const out: Todo[] = payrolls
+    .filter((p) => p.status !== 'disbursed')
+    .sort((a, b) => a.year - b.year || a.month - b.month)
+    .flatMap((open) => {
+      const label = periodLabel(open)
+      const text =
+        open.status === 'draft'
+          ? `The ${label} payroll is a draft. Send it for review when it’s ready.`
+          : open.status === 'review' && viewer.isCompanyAdmin
+            ? `The ${label} payroll is waiting for your approval.`
+            : open.status === 'approved' && viewer.isFinance
+              ? `The ${label} payroll is approved. Mark it processed.`
+              : open.status === 'processed' && viewer.isFinance
+                ? `The ${label} payroll is processed. Mark it disbursed once salaries are paid.`
+                : null
+      return text
+        ? [{ key: `payroll-${open.id}`, area: 'payroll' as const, text, to: `/finance/payroll/${open.id}`, action: 'Payroll' }]
+        : []
+    })
   const year = Number(today.slice(0, 4))
   const month = Number(today.slice(5, 7))
   if (Number(today.slice(8, 10)) < PAYROLL_START_DAY || payrolls.some((p) => p.year === year && p.month === month))
-    return []
+    return out
   const lastDay = new Date(year, month, 0).getDate()
   return [
+    ...out,
     {
       key: 'payroll-start',
       area: 'payroll',

@@ -40,31 +40,29 @@ check('payrolls are listed newest first, with status, head count and net payable
   listRows()[0].includes('May 2026') && listRows()[0].includes('Draft') && listRows()[0].includes('3') &&
     listRows()[0].includes('590,500') && listRows()[1].includes('April 2026') && listRows()[1].includes('Disbursed'),
   listRows().join(' | '))
-check('a new payroll can’t be started while one is open, and the page says why',
-  button('New payroll')?.hasAttribute('disabled') &&
-    text().includes('The May 2026 payroll is a draft. It must be disbursed before another is started.'))
+check('a new payroll can be started while another is open', button('New payroll')?.hasAttribute('disabled') === false)
 await click(row('May 2026'))
 check('a row opens the payroll', location.pathname === '/finance/payroll/pr-may', location.pathname)
 
 // ============================== starting one ==============================
 reset()
-Object.assign(table('payrolls').find((p) => p.id === 'pr-may')!, { status: 'processed' })
 signInAs(PEOPLE.hr)
 await mountApp('/finance/payroll')
-check('a processed payroll is still open until it’s disbursed',
-  button('New payroll')?.hasAttribute('disabled') &&
-    text().includes('The May 2026 payroll is processed. It must be disbursed before another is started.'))
-Object.assign(table('payrolls').find((p) => p.id === 'pr-may')!, { status: 'disbursed' })
-await mountApp('/finance/payroll')
-check('with every payroll disbursed, a new one can be started', button('New payroll')?.hasAttribute('disabled') === false)
 await click(button('New payroll'))
-check('…for the month after the latest, by default',
+check('with the latest still a draft, a new one starts, for the month after it by default',
   combo('Month')?.textContent === 'June' && combo('Year')?.textContent === '2026',
   `${combo('Month')?.textContent} ${combo('Year')?.textContent}`)
 failNext('rpc.payroll_create', { code: '23505', message: 'There is already a payroll for June 2026.' })
 await click(button('Create', d()))
 check('a refusal is shown in the dialog', d().textContent?.includes('There is already a payroll for June 2026.'))
-await choose('Month', 'July', d())
+await choose('Year', '2026', d())
+combo('Month')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+await waitFor(() => options().length > 0)
+const monthOption = (name: string) => options().find((o) => o.textContent?.trim() === name)
+check('a month that already has a payroll, in any status, can’t be picked',
+  monthOption('May')?.getAttribute('aria-disabled') === 'true' && monthOption('April')?.getAttribute('aria-disabled') === 'true' &&
+    monthOption('July')?.getAttribute('aria-disabled') !== 'true')
+await click(monthOption('July'))
 await click(button('Create', d()))
 check('creating goes through payroll_create with the month and year',
   rpcArgs('payroll_create').at(-1) === JSON.stringify({ p_year: 2026, p_month: 7 }), rpcArgs('payroll_create').join())

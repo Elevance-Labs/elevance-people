@@ -29,7 +29,7 @@ reset()
 signInAs(PEOPLE.hr) // Bilal: HR admin, People Ops
 await mountApp('/dashboard')
 await loaded()
-await waitFor(() => !!item('payroll') && !!item('leaves'))
+await waitFor(() => !!item('payroll-pr-may') && !!item('leaves'))
 
 check('HR is asked to approve Sara’s leave, not the one already approved as HR, nor their own',
   item('leaves')?.text.includes('1 leave request is waiting for your approval.') &&
@@ -40,8 +40,8 @@ check('HR is asked to approve the claim in review, and nothing finance does',
   !item('reimbursements-process') && !item('reimbursements-disburse'), keys())
 check('…linking to claims in review', item('reimbursements-approve')?.href.endsWith('/finance/reimbursements?status=review'))
 check('the draft payroll asks to be sent for review',
-  item('payroll')?.text.includes('The May 2026 payroll is a draft.') && item('payroll')?.href.endsWith('/finance/payroll/pr-may'),
-  item('payroll')?.text)
+  item('payroll-pr-may')?.text.includes('The May 2026 payroll is a draft.') && item('payroll-pr-may')?.href.endsWith('/finance/payroll/pr-may'),
+  item('payroll-pr-may')?.text)
 check('each onboarding section with tasks left is one nudge (everyone’s sections are HR’s)',
   !!item('onboarding-ob-sara-Paperwork')?.text.includes('Sara Iqbal’s onboarding: Paperwork (1 task left).') &&
   !!item('onboarding-ob-sara-IT setup'), keys())
@@ -128,14 +128,14 @@ table('payrolls').find((p) => p.id === 'pr-may')!.status = 'approved'
 signInAs(FINANCE)
 await mountApp('/dashboard')
 await loaded()
-await waitFor(() => !!item('payroll'))
+await waitFor(() => !!item('payroll-pr-may'))
 check('finance is asked to process the approved claim and disburse the processed one',
   item('reimbursements-process')?.text.includes('1 reimbursement claim to process.') &&
   item('reimbursements-disburse')?.text.includes('1 reimbursement claim to disburse.') && !item('reimbursements-approve'), keys())
 check('…linking to each status', item('reimbursements-process')?.href.endsWith('?status=approved') &&
   item('reimbursements-disburse')?.href.endsWith('?status=processed'))
 check('an approved payroll asks finance to mark it processed',
-  item('payroll')?.text.includes('The May 2026 payroll is approved. Mark it processed.'), item('payroll')?.text)
+  item('payroll-pr-may')?.text.includes('The May 2026 payroll is approved. Mark it processed.'), item('payroll-pr-may')?.text)
 check('finance isn’t asked about leave or onboarding', !item('leaves') && !items().some((i) => i.key.startsWith('onboarding')))
 
 // ============================== company admin ==============================
@@ -147,9 +147,9 @@ table('reimbursements').push({ ...table('reimbursements').find((r) => r.id === '
 signInAs(PEOPLE.companyAdmin)
 await mountApp('/dashboard')
 await loaded()
-await waitFor(() => !!item('payroll') && !!item('appraisals'))
+await waitFor(() => !!item('payroll-pr-may') && !!item('appraisals'))
 check('a payroll in review asks a company admin to approve it',
-  item('payroll')?.text.includes('The May 2026 payroll is waiting for your approval.'), item('payroll')?.text)
+  item('payroll-pr-may')?.text.includes('The May 2026 payroll is waiting for your approval.'), item('payroll-pr-may')?.text)
 check('a company admin works claims as HR and finance, but not one they made',
   item('reimbursements-approve')?.text.includes('1 reimbursement claim to approve.') && !!item('reimbursements-process') &&
   !!item('reimbursements-disburse'), item('reimbursements-approve')?.text)
@@ -173,13 +173,21 @@ const hr = { id: 'e-bilal', isHr: true, isFinance: false, isCompanyAdmin: false,
 const disbursedMay = [{ id: 'p', year: 2026, month: 5, status: 'disbursed' as const }]
 check('no payroll nudge before the 25th', payrollTodos(disbursedMay, hr, '2026-06-24').length === 0)
 const start = payrollTodos(disbursedMay, hr, '2026-06-25')[0]
-check('from the 25th, with none open, start this month’s, due by its last day',
+check('from the 25th, start this month’s, due by its last day',
   start?.text === `Start the ${new Date(2026, 5, 1).toLocaleDateString(undefined, { month: 'long' })} 2026 payroll.` &&
   start.due === '2026-06-30' && start.to === '/finance/payroll', JSON.stringify(start))
 check('…not once this month’s exists',
   payrollTodos([...disbursedMay, { id: 'q', year: 2026, month: 6, status: 'disbursed' }], hr, '2026-06-26').length === 0)
 check('…and not for someone outside payroll', payrollTodos(disbursedMay, { ...hr, canManagePayroll: false }, '2026-06-26').length === 0)
-check('a payroll in review isn’t HR’s step', payrollTodos([{ id: 'r', year: 2026, month: 6, status: 'review' }], hr).length === 0)
+check('a payroll in review isn’t HR’s step',
+  payrollTodos([{ id: 'r', year: 2026, month: 6, status: 'review' }], hr, '2026-06-26').length === 0)
+const twoDrafts = payrollTodos(
+  [{ id: 'jun', year: 2026, month: 6, status: 'draft' }, { id: 'may', year: 2026, month: 5, status: 'draft' }], hr, '2026-06-26')
+check('every open payroll gets its own nudge, oldest first',
+  twoDrafts.map((x) => x.key).join() === 'payroll-may,payroll-jun', twoDrafts.map((x) => x.key).join())
+const draftMay = payrollTodos([{ id: 'may', year: 2026, month: 5, status: 'draft' }], hr, '2026-06-26')
+check('an open payroll doesn’t hold back starting this month’s',
+  draftMay.map((x) => x.key).join() === 'payroll-may,payroll-start', draftMay.map((x) => x.key).join())
 
 const t = (key: string, due?: string) => ({ key, area: 'leaves' as const, text: key, due, to: '/', action: 'Go' })
 check('sorted overdue first, then soonest, then undated',

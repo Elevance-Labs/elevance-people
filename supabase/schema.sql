@@ -715,8 +715,6 @@ create table public.payrolls (
   disbursed_at timestamptz,
   constraint payrolls_period_key unique (year, month)
 );
--- At most one payroll not yet disbursed.
-create unique index payrolls_one_open on public.payrolls ((true)) where status <> 'disbursed';
 
 -- Money is in PKR. Column order matches the migrated database (arrears was
 -- added later, and gross and net re-added after it).
@@ -2930,12 +2928,12 @@ $$;
 -- ---------------------------------------------------------------------------
 
 -- Start a month's payroll with everyone who may log in (probation, active,
--- notice period). Refused while another payroll is open.
+-- notice period). Refused if that month and year already has one; others
+-- may be open at the same time.
 create function public.payroll_create(p_year integer, p_month integer)
 returns uuid language plpgsql security definer set search_path = '' as $$
 declare
-  v_open public.payrolls;
-  v_id   uuid;
+  v_id uuid;
 begin
   if not public.can_manage_payroll() then
     raise exception 'Only HR and finance can create a payroll.' using errcode = '42501';
@@ -2946,12 +2944,6 @@ begin
   if exists (select 1 from public.payrolls where year = p_year and month = p_month) then
     raise exception 'There is already a payroll for %.', to_char(make_date(p_year, p_month, 1), 'FMMonth YYYY')
       using errcode = '23505';
-  end if;
-  select * into v_open from public.payrolls where status <> 'disbursed';
-  if found then
-    raise exception 'The % payroll is still %. It must be disbursed before another is started.',
-      to_char(make_date(v_open.year, v_open.month, 1), 'FMMonth YYYY'),
-      case v_open.status when 'draft' then 'a draft' when 'review' then 'in review' else v_open.status::text end;
   end if;
 
   insert into public.payrolls (year, month, created_by)
