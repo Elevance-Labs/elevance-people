@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Box, Button, Chip, Divider, Paper, Stack, Typography } from '@mui/material'
+import DevicesOutlinedIcon from '@mui/icons-material/DevicesOutlined'
 import EventAvailableOutlinedIcon from '@mui/icons-material/EventAvailableOutlined'
 import HowToRegOutlinedIcon from '@mui/icons-material/HowToRegOutlined'
 import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined'
@@ -48,6 +49,7 @@ const ICONS: Record<TodoArea, ReactNode> = {
   onboarding: <HowToRegOutlinedIcon fontSize="small" />,
   offboarding: <PersonRemoveOutlinedIcon fontSize="small" />,
   payroll: <PaymentsOutlinedIcon fontSize="small" />,
+  equipment: <DevicesOutlinedIcon fontSize="small" />,
 }
 
 const TASKS = 'tasks:{table}(section, section_order, sort_order, department_id, done_at)'
@@ -213,7 +215,7 @@ function usePerformanceTodos(add: (source: string, todos: Todo[]) => void) {
 // Each source loads on its own and is left out if it fails; RLS decides what
 // each role reads, and the builders in lib/todos.ts what is the viewer's.
 export function Todos() {
-  const { employee, isHr, isFinance, isCompanyAdmin, isManager, canManagePayroll } = useAuth()
+  const { employee, isHr, isFinance, isCompanyAdmin, isManager, canManagePayroll, canManageOperations } = useAuth()
   const me = employee!.id
   const [parts, setParts] = useState<Record<string, Todo[]>>({})
   const [add] = useState(() => (source: string, todos: Todo[]) => setParts((p) => ({ ...p, [source]: todos })))
@@ -312,6 +314,33 @@ export function Todos() {
         if (!error) add('payroll', payrollTodos((data ?? []) as Payroll[], viewer))
       })
   }, [canManagePayroll, viewer, add])
+
+  // Operations roles: equipment people asked for, not yet assigned.
+  useEffect(() => {
+    if (!canManageOperations) return
+    supabase
+      .from('equipment')
+      .select('id')
+      .eq('status', 'requested')
+      .is('assigned_to', null)
+      .then(({ data }) => {
+        const n = data?.length ?? 0
+        add(
+          'equipment',
+          n
+            ? [
+                {
+                  key: 'equipment-requests',
+                  area: 'equipment',
+                  text: `${n === 1 ? '1 equipment request is' : `${n} equipment requests are`} waiting.`,
+                  to: '/operations/equipment?status=requested',
+                  action: 'Equipment',
+                },
+              ]
+            : [],
+        )
+      })
+  }, [canManageOperations, add])
 
   const todos = sortTodos(Object.values(parts).flat())
   if (!todos.length) return null

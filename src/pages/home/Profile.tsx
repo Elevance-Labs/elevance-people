@@ -1,8 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Alert,
   Box,
+  Button,
+  Chip,
   CircularProgress,
   Grid,
   Paper,
@@ -15,22 +17,40 @@ import {
   TableHead,
   TableRow,
   Tabs,
+  TextField,
   Typography,
 } from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
 import { useAuth } from "../../auth/AuthProvider";
-import { PageHeader, PersonAvatar, StatusChip } from "../../components/common";
+import {
+  FormDialog,
+  PageHeader,
+  PersonAvatar,
+  StatusChip,
+} from "../../components/common";
 import { supabase } from "../../lib/supabase";
 import {
   EMPLOYMENT_TYPE_LABELS,
   formatDate,
   formatEmployeeNumber,
 } from "../../lib/constants";
-import type { Employee, MyEquipment } from "../../lib/types";
+import {
+  EQUIPMENT_DESCRIPTION_MAX,
+  equipmentRequestError,
+  oneLine,
+} from "../../lib/equipment";
+import type {
+  Employee,
+  MyEquipment,
+  MyEquipmentRequest,
+} from "../../lib/types";
 import Payslips from "./Payslips";
 import Salary from "./Salary";
 
 // Everyone's own record, read-only: changes go through HR. Members read their
-// own row by RLS, their equipment through my_equipment and their disbursed
+// own row by RLS, their equipment through my_equipment (and ask for more
+// through equipment_request, their waiting requests through
+// my_equipment_requests) and their disbursed
 // payroll lines through my_payslips and their approved salaries through
 // my_salaries.
 // The tab lives in the URL (?tab=salary) so it can be linked to.
@@ -160,17 +180,52 @@ function ProfileDetails({ record }: { record: OwnRecord }) {
   );
 }
 
-// Only the name, identifier and date: my_equipment returns nothing else.
+// What they have (identifier, description and date: all my_equipment
+// returns), their requests still waiting, and asking for something new.
 function EquipmentTab() {
   const [rows, setRows] = useState<MyEquipment[] | null>(null);
+  const [requests, setRequests] = useState<MyEquipmentRequest[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // The new request's description while the dialog is open.
+  const [asking, setAsking] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [dialogError, setDialogError] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
+
+  const load = useCallback(
+    () =>
+      Promise.all([
+        supabase.rpc("my_equipment"),
+        supabase.rpc("my_equipment_requests"),
+      ]).then(([equipmentRes, requestsRes]) => {
+        const loadError = equipmentRes.error ?? requestsRes.error;
+        if (loadError) setError(loadError.message);
+        else {
+          setRows(equipmentRes.data as MyEquipment[]);
+          setRequests(requestsRes.data as MyEquipmentRequest[]);
+        }
+      }),
+    [],
+  );
 
   useEffect(() => {
-    supabase.rpc("my_equipment").then(({ data, error: loadError }) => {
-      if (loadError) setError(loadError.message);
-      else setRows(data as MyEquipment[]);
+    load();
+  }, [load]);
+
+  async function request() {
+    const description = (asking ?? "").trim();
+    if (!description) return setDialogError("Describe what you need.");
+    setBusy(true);
+    setDialogError(null);
+    const { error: rpcError } = await supabase.rpc("equipment_request", {
+      p_description: description,
     });
-  }, []);
+    setBusy(false);
+    if (rpcError) return setDialogError(equipmentRequestError(rpcError));
+    setAsking(null);
+    setSent(true);
+    load();
+  }
 
   if (error) return <Alert severity="error">{error}</Alert>;
   if (!rows) {
@@ -180,43 +235,146 @@ function EquipmentTab() {
       </Box>
     );
   }
-  if (!rows.length) {
-    return (
-      <Paper variant="outlined" sx={{ py: 8, px: 2, textAlign: "center" }}>
-        <Typography sx={{ color: "text.secondary" }}>
-          No equipment is assigned to you.
-        </Typography>
-      </Paper>
-    );
-  }
   return (
-    <Paper variant="outlined" sx={{ overflow: "hidden" }}>
-      <TableContainer>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Equipment</TableCell>
-              <TableCell>Identifier</TableCell>
-              <TableCell>Assigned on</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow
-                key={r.identifier}
-                sx={{ "&:last-child td": { borderBottom: 0 } }}
-              >
-                <TableCell>{r.name}</TableCell>
-                <TableCell sx={{ fontFamily: "monospace" }}>
-                  {r.identifier}
-                </TableCell>
-                <TableCell>{formatDate(r.assigned_on)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Paper>
+    <Stack spacing={3}>
+      {rows.length ? (
+        <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+          <TableContainer>
+            <Table aria-label="Your equipment">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Identifier</TableCell>
+                  <TableCell>Description</TableCell>
+                  <TableCell>Assigned on</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {rows.map((r) => (
+                  <TableRow
+                    key={r.identifier}
+                    sx={{ "&:last-child td": { borderBottom: 0 } }}
+                  >
+                    <TableCell sx={{ fontFamily: "monospace" }}>
+                      {r.identifier}
+                    </TableCell>
+                    <TableCell sx={{ overflowWrap: "anywhere" }}>
+                      {r.description}
+                    </TableCell>
+                    <TableCell>{formatDate(r.assigned_on)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      ) : (
+        <Paper variant="outlined" sx={{ py: 8, px: 2, textAlign: "center" }}>
+          <Typography sx={{ color: "text.secondary" }}>
+            No equipment is assigned to you.
+          </Typography>
+        </Paper>
+      )}
+      <Paper variant="outlined" component="section" sx={{ overflow: "hidden" }}>
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={2}
+          sx={{
+            alignItems: { xs: "stretch", sm: "center" },
+            justifyContent: "space-between",
+            p: 2,
+          }}
+        >
+          <Box>
+            <Typography
+              variant="subtitle1"
+              component="h2"
+              sx={{ fontWeight: 600 }}
+            >
+              Your requests
+            </Typography>
+            <Typography variant="body2" sx={{ color: "text.secondary" }}>
+              Need something for your work? Ask for it here; HR will follow up.
+            </Typography>
+          </Box>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => {
+              setDialogError(null);
+              setSent(false);
+              setAsking("");
+            }}
+            sx={{ flexShrink: 0 }}
+          >
+            Request equipment
+          </Button>
+        </Stack>
+        {sent && (
+          <Alert
+            severity="success"
+            onClose={() => setSent(false)}
+            sx={{ mx: 2, mb: 2 }}
+          >
+            Your request has been sent.
+          </Alert>
+        )}
+        {requests.length > 0 && (
+          <TableContainer>
+            <Table aria-label="Your requests">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Description</TableCell>
+                  <TableCell>Requested on</TableCell>
+                  <TableCell>Status</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {requests.map((r) => (
+                  <TableRow
+                    key={r.id}
+                    sx={{ "&:last-child td": { borderBottom: 0 } }}
+                  >
+                    <TableCell sx={{ overflowWrap: "anywhere" }}>
+                      {r.description}
+                    </TableCell>
+                    <TableCell>{formatDate(r.request_date)}</TableCell>
+                    <TableCell>
+                      <Chip
+                        label="Waiting"
+                        color="info"
+                        size="small"
+                        variant="outlined"
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </Paper>
+      <FormDialog
+        open={asking !== null}
+        title="Request equipment"
+        submitLabel="Send request"
+        error={dialogError}
+        busy={busy}
+        onSubmit={request}
+        onClose={() => setAsking(null)}
+      >
+        <TextField
+          label="What do you need?"
+          required
+          fullWidth
+          autoFocus
+          value={asking ?? ""}
+          onChange={(e) => setAsking(oneLine(e.target.value))}
+          placeholder="e.g. Name of the device or equipment, or a description of what you need"
+          slotProps={{ htmlInput: { maxLength: EQUIPMENT_DESCRIPTION_MAX } }}
+          helperText={`${(asking ?? "").length}/${EQUIPMENT_DESCRIPTION_MAX}`}
+        />
+      </FormDialog>
+    </Stack>
   );
 }
 

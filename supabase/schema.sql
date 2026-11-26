@@ -834,11 +834,16 @@ create table public.vendors (
 );
 create unique index vendors_name_key on public.vendors (lower(name));
 
+-- An employee's request is a row in status requested, made only by
+-- equipment_request; declining it deletes the row. Identifier and purchase
+-- date may wait, but equipment_assign needs both.
 create table public.equipment (
   id            uuid primary key default gen_random_uuid(),
+  -- The previous build's copy of description, kept equal by equipment_guard;
+  -- to be dropped.
   name          text not null check (name = trim(name) and name <> ''),
   -- A serial or asset tag, typed in by hand.
-  identifier    text not null check (identifier = trim(identifier) and identifier <> ''),
+  identifier    text check (identifier = trim(identifier) and identifier <> ''),
   status        public.equipment_status not null default 'active',
   purchase_date date,
   vendor_id     uuid,
@@ -852,6 +857,14 @@ create table public.equipment (
   created_by    uuid references public.employees (id) on delete set null,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
+  -- What it is, in one line.
+  description   text not null
+                constraint equipment_description_check
+                check (description = trim(description) and description <> '' and length(description) <= 150
+                       and description !~ '[\r\n]'),
+  request_date  date,
+  -- Who asked for it; set only by equipment_request.
+  requested_by  uuid references public.employees (id) on delete set null,
   -- Named explicitly: the app embeds the vendor through this FK.
   constraint equipment_vendor_id_fkey foreign key (vendor_id)
     references public.vendors (id) on delete restrict
@@ -1735,16 +1748,23 @@ create trigger payroll_items_guard
 create trigger vendors_touch before update on public.vendors
   for each row execute function public.touch_updated_at();
 
--- Stamps the creator; keeps assigned_on with assigned_to (also when the
--- employee is deleted); refuses retired or sold equipment with a holder.
+-- Stamps the creator; keeps name equal to description (whichever the caller
+-- changed); keeps assigned_on with assigned_to (also when the employee is
+-- deleted); refuses retired or sold equipment with a holder, and a holder on
+-- equipment with no identifier or purchase date, or still a request.
 create function public.equipment_guard()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
   if tg_op = 'INSERT' then
     new.created_by := public.current_employee_id();
+    new.description := coalesce(new.description, new.name);
   else
     new.updated_at := now();
+    if new.description is not distinct from old.description and new.name is distinct from old.name then
+      new.description := new.name;
+    end if;
   end if;
+  new.name := new.description;
   if new.assigned_to is null then
     new.assigned_on := null;
   end if;
@@ -1753,6 +1773,14 @@ begin
       raise exception 'Unassign it before marking it %.', new.status using errcode = '23514';
     end if;
     raise exception 'Retired or sold equipment can''t be assigned.' using errcode = '23514';
+  end if;
+  if new.assigned_to is not null then
+    if new.identifier is null or new.purchase_date is null then
+      raise exception 'Equipment someone has needs an identifier and a purchase date.' using errcode = '23514';
+    end if;
+    if new.status = 'requested' then
+      raise exception 'Equipment someone has can''t be a request.' using errcode = '23514';
+    end if;
   end if;
   return new;
 end;
@@ -3010,7 +3038,7 @@ $$;
 
 -- Assign to an employee from a date (today or earlier), ending the current
 -- holder's assignment that day. The date can't go back past the equipment's
--- history.
+-- history. Needs an identifier and a purchase date; a request becomes active.
 create function public.equipment_assign(p_equipment_id uuid, p_employee_id uuid, p_assigned_on date)
 returns void language plpgsql security definer set search_path = '' as $$
 declare
@@ -3025,6 +3053,9 @@ begin
   select * into v_item from public.equipment where id = p_equipment_id for update;
   if not found then
     raise exception 'Equipment not found.' using errcode = 'P0002';
+  end if;
+  if v_item.identifier is null or v_item.purchase_date is null then
+    raise exception 'Add its identifier and purchase date before assigning it.' using errcode = '23514';
   end if;
   if p_assigned_on is null or p_assigned_on > current_date then
     raise exception 'Pick an assignment date, today or earlier.' using errcode = '23514';
@@ -3047,7 +3078,9 @@ begin
    where equipment_id = p_equipment_id and unassigned_on is null;
   insert into public.equipment_assignments (equipment_id, employee_id, assigned_on, assigned_by)
   values (p_equipment_id, p_employee_id, p_assigned_on, v_me);
-  update public.equipment set assigned_to = p_employee_id, assigned_on = p_assigned_on
+  update public.equipment
+     set assigned_to = p_employee_id, assigned_on = p_assigned_on,
+         status = case when status = 'requested' then 'active'::public.equipment_status else status end
    where id = p_equipment_id;
 end;
 $$;
@@ -3080,14 +3113,49 @@ end;
 $$;
 
 -- The caller's own equipment, as their profile shows it: no vendor, files or
--- history.
+-- history. name is the previous build's copy of description.
 create function public.my_equipment()
-returns table (name text, identifier text, assigned_on date)
+returns table (description text, identifier text, assigned_on date, name text)
 language sql stable security definer set search_path = '' as $$
-  select e.name, e.identifier, e.assigned_on
+  select e.description, e.identifier, e.assigned_on, e.description
     from public.equipment e
    where e.assigned_to = public.current_employee_id()
-   order by e.assigned_on desc, e.name;
+   order by e.assigned_on desc, e.description;
+$$;
+
+-- The caller asks for equipment: a one-line description, up to 150
+-- characters. Requested today, by them. Returns its id.
+create function public.equipment_request(p_description text)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare
+  v_me          uuid := public.current_employee_id();
+  v_description text := trim(p_description);
+  v_id          uuid;
+begin
+  if v_me is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+  if v_description is null or v_description = '' or length(v_description) > 150 or v_description ~ '[\r\n]' then
+    raise exception 'Describe what you need in one line, up to 150 characters.' using errcode = '23514';
+  end if;
+  insert into public.equipment (description, status, request_date, requested_by)
+  values (v_description, 'requested', public.company_today(), v_me)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- The caller's requests still waiting: never assigned to anyone yet. A
+-- declined one is gone; an assigned one is in my_equipment.
+create function public.my_equipment_requests()
+returns table (id uuid, description text, request_date date)
+language sql stable security definer set search_path = '' as $$
+  select e.id, e.description, e.request_date
+    from public.equipment e
+   where e.requested_by = public.current_employee_id()
+     and e.assigned_to is null
+     and not exists (select 1 from public.equipment_assignments a where a.equipment_id = e.id)
+   order by e.request_date desc nulls last, e.created_at desc;
 $$;
 
 -- ---------------------------------------------------------------------------
@@ -4285,8 +4353,9 @@ grant insert (name, description, bank_name, iban), update (name, description, ba
   on public.vendors to authenticated;
 -- Who has it changes only through the functions above; created_by is stamped.
 grant select, delete on public.equipment to authenticated;
-grant insert (name, identifier, status, purchase_date, vendor_id, invoice_path, photo_path),
-      update (name, identifier, status, purchase_date, vendor_id, invoice_path, photo_path)
+-- name is the previous build's; requested_by is set only by equipment_request.
+grant insert (name, identifier, status, purchase_date, vendor_id, invoice_path, photo_path, description, request_date),
+      update (name, identifier, status, purchase_date, vendor_id, invoice_path, photo_path, description, request_date)
   on public.equipment to authenticated;
 grant select on public.equipment_assignments to authenticated;
 
@@ -4448,6 +4517,11 @@ grant execute on function public.my_payslips() to authenticated;
 -- Who's off: everyone's dashboard.
 revoke execute on function public.who_is_off() from public, anon, authenticated;
 grant execute on function public.who_is_off() to authenticated;
+
+-- Equipment requests: anyone signed in, for themselves.
+revoke execute on function public.equipment_request(text), public.my_equipment_requests()
+  from public, anon, authenticated;
+grant execute on function public.equipment_request(text), public.my_equipment_requests() to authenticated;
 
 -- The public job pages, for people who aren't signed in.
 grant execute on function
@@ -4763,7 +4837,9 @@ create policy salary_revisions_delete on public.salary_revisions for delete to a
 
 -- Vendors and equipment: HR, finance and company admins only; only a company
 -- admin deletes a vendor. Employees see their own equipment through
--- my_equipment. The history is written only by the equipment functions.
+-- my_equipment, and ask for some through equipment_request (their waiting
+-- requests through my_equipment_requests). The history is written only by
+-- the equipment functions.
 create policy vendors_select on public.vendors
   for select to authenticated using ((select public.can_manage_operations()));
 create policy vendors_insert on public.vendors

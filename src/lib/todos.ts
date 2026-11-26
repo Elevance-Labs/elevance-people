@@ -18,6 +18,7 @@ export type TodoArea =
   | 'onboarding'
   | 'offboarding'
   | 'payroll'
+  | 'equipment'
 
 export interface Todo {
   key: string

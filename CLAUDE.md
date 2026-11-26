@@ -21,7 +21,7 @@ behaviour).
   public application page; an applications board with stages), **human
   resources** (onboarding, offboarding with HR and manager sign-off), **finance** (payroll,
   reimbursements),
-  **operations** (equipment and its assignments), **company settings**
+  **operations** (equipment, its assignments, employees' requests), **company settings**
   (departments, designations, KPIs, expectations, holidays, announcements, branding), and
   **configuration** (the onboarding and offboarding checklists, vendors, the
   Resources guides).
@@ -74,7 +74,8 @@ behaviour).
   note. Payrolls are created and
   change status only through `payroll_create` / `payroll_move`. Equipment
   changes hands only through `equipment_assign` / `equipment_unassign`, which
-  keep its history. A monthly review is created and changes status only
+  keep its history; an employee asks for it only through `equipment_request`
+  (declining is deleting the row). A monthly review is created and changes status only
   through `review_start` / `_submit` / `_acknowledge` and is final once
   submitted (no reopen, by design); clients
   write only a draft's text and ratings, as the employee's current manager.
@@ -182,7 +183,8 @@ behaviour).
   leave to approve, claims to approve / process / disburse, one nudge per
   onboarding / offboarding section left — a department's to the manager in
   it, the rest to HR — offboarding details and sign-off, each open payroll's next
-  step and a start nudge from the 25th, appraisals to approve; hidden when
+  step and a start nudge from the 25th, appraisals to approve, equipment
+  requests waiting; hidden when
   empty), own scores (*My performance*: performance, KPI and
   expectation scores, each KPI's and expectation's average over own submitted
   reviews; the designation's current KPIs and expectations always listed,
@@ -198,7 +200,7 @@ behaviour).
   in an iframe (a shared link through its `/edit` view, so Google commenters
   can comment); back to Resources if RLS hides it or it has no link.
 - `/handbook` — everyone: the Google Doc handbook in an iframe (its `/preview`
-  URL, from `constants.ts`). `/profile` — everyone: own record, read-only (RLS: a member reads only their own row); tabs *Profile*, *Equipment* (own equipment via `my_equipment`: name, identifier, date), *Salary* (own approved salaries via `my_salaries`: current, then history), *Payslips* (own disbursed payroll lines via `my_payslips`; breakdown dialog and PDF), tab kept in `?tab=`.
+  URL, from `constants.ts`). `/profile` — everyone: own record, read-only (RLS: a member reads only their own row); tabs *Profile*, *Equipment* (own equipment via `my_equipment`: identifier, description, date; own waiting requests via `my_equipment_requests`; *Request equipment* via `equipment_request`), *Salary* (own approved salaries via `my_salaries`: current, then history), *Payslips* (own disbursed payroll lines via `my_payslips`; breakdown dialog and PDF), tab kept in `?tab=`.
 - `/employees` — HR list of employee records. HR only.
 - `/appraisals` — HR: salary revisions by status (`?status=`, drafts by
   default); write drafts, send for review; company admins approve / reject.
@@ -256,7 +258,8 @@ behaviour).
   roles: *Claim for* anyone, themselves by default), withdraw while in review.
 - `/operations/equipment` — HR, finance admins, company admins: equipment
   (`?status=` filter, search). `/operations/equipment/new`, `/:id` — details,
-  invoice and photo, delete; assign / reassign / unassign, history.
+  invoice and photo, delete (a request: *Decline*); assign / reassign /
+  unassign, history.
 - `/configuration/vendors` — HR, finance admins, company admins: add, edit;
   delete is company-admin only.
 - `/company/departments`, `/company/designations`, `/company/branding`,
@@ -346,8 +349,9 @@ behaviour).
 - `branding.ts` — the company detail fields on branding (labels, limits,
   select list) and splitting a multi-line field.
 - `equipment.ts` — equipment select (named vendor FK), vendor select with
-  equipment count, IBAN normalising, equipment-bucket upload / remove, error
-  messages.
+  equipment count, the description limit, when it can be assigned (mirror of
+  `equipment_assign`), open requests, IBAN normalising, equipment-bucket
+  upload / remove, error messages.
 - `passwordLogin.ts` — password minimum (mirror of the function's), the
   password generator, and calling `set-password` with its error message.
 - `guides.ts` — guide select, function summaries, turning a Google
@@ -539,15 +543,22 @@ Full detail in `supabase/schema.sql`.
 - `vendors` — name (unique case-insensitively), description, bank, IBAN
   (format checked). Operations roles read and write; only company admins
   delete, refused while equipment is linked.
-- `equipment` — name, identifier (unique case-insensitively), status enum,
-  purchase date, vendor, invoice and photo in the private `equipment` bucket.
-  `assigned_to` / `assigned_on` not client-writable. `equipment_guard` stamps
-  `created_by`, refuses retired / sold with a holder. Operations roles only
-  (RLS). `equipment_assignments` — the history, one open row per item;
-  written only by `equipment_assign` / `_unassign`. Deleting the employee
-  unassigns (FK set null) and drops their history rows. `my_equipment` — the
-  caller's items (name, identifier, date); the only way an employee reads
-  equipment.
+- `equipment` — identifier (unique case-insensitively), one-line
+  description, status enum, purchase date, request date, vendor, invoice and
+  photo in the private `equipment` bucket. Identifier and purchase date may
+  be blank until assigned (`equipment_assign` needs both; the guard keeps
+  them while held). `name` is a legacy copy of description for the previous
+  build, kept equal by `equipment_guard`; drop it in a later change.
+  `assigned_to` / `assigned_on` / `requested_by` not client-writable.
+  `equipment_guard` stamps `created_by`, refuses retired / sold with a
+  holder. Operations roles only (RLS). `equipment_request` — anyone signed
+  in: a requested row, dated today, `requested_by` them; assigning makes it
+  active, declining deletes it. `equipment_assignments` — the history, one
+  open row per item; written only by `equipment_assign` / `_unassign`.
+  Deleting the employee unassigns (FK set null) and drops their history
+  rows. `my_equipment` (the caller's items: identifier, description, date)
+  and `my_equipment_requests` (their requests never yet assigned) are the
+  only ways an employee reads equipment.
 - `reimbursements` — one claim: description, expense date, amount, 1–3
   receipt paths in the private `reimbursements` bucket at
   `<employee_id>/…`, and who made it (`created_by`). Status `review` → `approved` → `processed` →

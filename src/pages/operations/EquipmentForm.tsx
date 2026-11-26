@@ -34,8 +34,13 @@ import {
 } from '../../lib/constants'
 import { todayIso } from '../../lib/leaves'
 import {
+  EQUIPMENT_DESCRIPTION_MAX,
   EQUIPMENT_SELECT,
+  UNASSIGNABLE,
+  assignBlocker,
   equipmentError,
+  isOpenRequest,
+  oneLine,
   removeEquipmentFiles,
   uploadEquipmentFile,
   type EquipmentRow,
@@ -43,18 +48,24 @@ import {
 import type { DirectoryEntry, EquipmentAssignment, EquipmentStatus, Vendor } from '../../lib/types'
 
 const STATUSES = Object.keys(EQUIPMENT_STATUS_LABELS) as EquipmentStatus[]
-// Retired or sold equipment can't have a holder (equipment_guard).
-const UNASSIGNABLE: EquipmentStatus[] = ['retired', 'sold']
 
-const EMPTY = { name: '', identifier: '', status: 'active' as EquipmentStatus, purchase_date: '', vendor_id: '' }
+const EMPTY = {
+  identifier: '',
+  description: '',
+  status: 'active' as EquipmentStatus,
+  purchase_date: '',
+  request_date: '',
+  vendor_id: '',
+}
 type FormState = typeof EMPTY
 type Person = Pick<DirectoryEntry, 'id' | 'full_name' | 'employee_number' | 'status'>
 
 const toForm = (r: EquipmentRow): FormState => ({
-  name: r.name,
-  identifier: r.identifier,
+  identifier: r.identifier ?? '',
+  description: r.description,
   status: r.status,
   purchase_date: r.purchase_date ?? '',
+  request_date: r.request_date ?? '',
   vendor_id: r.vendor_id ?? '',
 })
 
@@ -152,7 +163,9 @@ function FileField({
 // Operations → Equipment → one item (HR, finance admins, company admins).
 // Details, invoice and photo are saved together; a picked file is uploaded
 // on save and the one it replaces removed afterwards. Who has it changes
-// only through equipment_assign / equipment_unassign, which keep the history.
+// only through equipment_assign / equipment_unassign, which keep the history
+// and need its identifier and purchase date. An employee's request is
+// completed here and assigned, or declined (deleted).
 export default function EquipmentForm() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -292,10 +305,11 @@ export default function EquipmentForm() {
     }
 
     const payload = {
-      name: form.name.trim(),
-      identifier: form.identifier.trim(),
+      identifier: form.identifier.trim() || null,
+      description: form.description.trim(),
       status: form.status,
       purchase_date: form.purchase_date || null,
+      request_date: form.request_date || null,
       vendor_id: form.vendor_id || null,
       ...paths,
     }
@@ -383,16 +397,19 @@ export default function EquipmentForm() {
 
   const set = (key: keyof FormState) => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [key]: e.target.value }))
-  const assignable = item && !UNASSIGNABLE.includes(item.status)
+  const blocker = item && assignBlocker(item)
+  const request = item && isOpenRequest(item)
   // Current employees only, and not whoever has it now.
   const candidates = people.filter((p) => !['left', 'terminated'].includes(p.status) && p.id !== item?.assigned_to)
+  // Someone has it: the guard keeps its identifier and purchase date.
+  const held = !!item?.assigned_to
 
   return (
     <Box sx={{ maxWidth: 1100 }}>
       <PageHeader
         back="/operations/equipment"
-        title={item ? item.name : 'New equipment'}
-        subtitle={item ? item.identifier : 'Add a piece of equipment'}
+        title={item ? (item.identifier ?? item.description) : 'New equipment'}
+        subtitle={item ? (item.identifier ? item.description : 'No identifier yet') : 'Add a piece of equipment'}
         actions={
           item && (
             <Chip
@@ -405,47 +422,75 @@ export default function EquipmentForm() {
       />
 
       <Stack spacing={3}>
+        {request && (
+          <Alert severity="info" variant="outlined">
+            {nameOf(item.requested_by!)} asked for this
+            {item.request_date ? ` on ${formatDate(item.request_date)}` : ''}. Add its identifier and purchase date,
+            then assign it, or decline the request.
+          </Alert>
+        )}
         <Box component="form" onSubmit={save}>
           <Stack spacing={3}>
             <Section title="Details" description="e.g. a laptop, monitor, mouse or printer.">
               <Grid container spacing={2.5}>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField label="Name" required fullWidth value={form.name} onChange={set('name')} />
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
+                <Grid size={{ xs: 12, sm: 4 }}>
                   <TextField
                     label="Identifier"
-                    required
+                    required={held}
                     fullWidth
                     value={form.identifier}
                     onChange={set('identifier')}
-                    helperText="A serial number or asset tag. No two items can share one."
+                    helperText="A serial number or asset tag, unique. Needed before it can be assigned."
                   />
                 </Grid>
-                <Grid size={{ xs: 12, sm: 4 }}>
+                <Grid size={{ xs: 12, sm: 8 }}>
+                  <TextField
+                    label="Description"
+                    required
+                    fullWidth
+                    value={form.description}
+                    onChange={(e) => setForm((f) => ({ ...f, description: oneLine(e.target.value) }))}
+                    slotProps={{ htmlInput: { maxLength: EQUIPMENT_DESCRIPTION_MAX } }}
+                    helperText={`${form.description.length}/${EQUIPMENT_DESCRIPTION_MAX}`}
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <TextField select label="Status" required fullWidth value={form.status} onChange={set('status')}>
                     {STATUSES.map((s) => (
                       <MenuItem
                         key={s}
                         value={s}
-                        disabled={!!item?.assigned_to && UNASSIGNABLE.includes(s) && item.status !== s}
+                        disabled={held && (UNASSIGNABLE.includes(s) || s === 'requested') && item?.status !== s}
                       >
                         {EQUIPMENT_STATUS_LABELS[s]}
                       </MenuItem>
                     ))}
                   </TextField>
                 </Grid>
-                <Grid size={{ xs: 12, sm: 4 }}>
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <TextField
                     label="Purchase date"
                     type="date"
+                    required={held}
                     fullWidth
                     value={form.purchase_date}
                     onChange={set('purchase_date')}
                     slotProps={{ inputLabel: { shrink: true } }}
+                    helperText="Needed before it can be assigned."
                   />
                 </Grid>
-                <Grid size={{ xs: 12, sm: 4 }}>
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <TextField
+                    label="Request date"
+                    type="date"
+                    fullWidth
+                    value={form.request_date}
+                    onChange={set('request_date')}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    helperText="Optional: when it was asked for."
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <TextField
                     select
                     label="Vendor"
@@ -491,7 +536,7 @@ export default function EquipmentForm() {
             <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
               {item && (
                 <Button color="error" startIcon={<DeleteOutlineIcon />} onClick={() => setConfirmDelete(true)} disabled={busy}>
-                  Delete equipment
+                  {request ? 'Decline request' : 'Delete equipment'}
                 </Button>
               )}
               <Box sx={{ flexGrow: 1 }} />
@@ -535,19 +580,23 @@ export default function EquipmentForm() {
                 )}
                 <Button
                   variant="contained"
-                  disabled={!assignable}
+                  disabled={!!blocker}
                   onClick={() => {
                     setDialogError(null)
-                    setAssigning({ employee_id: '', date: todayIso() })
+                    // A request goes to whoever asked, by default.
+                    const asker = request && candidates.some((p) => p.id === item.requested_by) ? item.requested_by! : ''
+                    setAssigning({ employee_id: asker, date: todayIso() })
                   }}
                 >
                   {item.assigned_to ? 'Reassign' : 'Assign'}
                 </Button>
               </Stack>
             </Stack>
-            {!assignable && (
+            {blocker && (
               <Alert severity="info" variant="outlined" sx={{ mb: 2 }}>
-                {EQUIPMENT_STATUS_LABELS[item.status]} equipment can’t be assigned.
+                {blocker === 'status'
+                  ? `${EQUIPMENT_STATUS_LABELS[item.status]} equipment can’t be assigned.`
+                  : 'Save its identifier and purchase date before assigning it.'}
               </Alert>
             )}
             {history.length ? (
@@ -650,9 +699,13 @@ export default function EquipmentForm() {
 
       <ConfirmDialog
         open={confirmDelete}
-        title="Delete equipment?"
-        message={`${item?.name} (${item?.identifier}), its invoice, photo and assignment history will be permanently deleted.`}
-        confirmLabel="Delete"
+        title={request ? 'Decline request?' : 'Delete equipment?'}
+        message={
+          request
+            ? `${nameOf(item.requested_by!)}’s request for “${item.description}” will be removed.`
+            : `${item?.description}${item?.identifier ? ` (${item.identifier})` : ''}, its invoice, photo and assignment history will be permanently deleted.`
+        }
+        confirmLabel={request ? 'Decline' : 'Delete'}
         destructive
         busy={busy}
         onConfirm={remove}

@@ -462,24 +462,30 @@ const VENDORS: Row[] = [
   },
 ]
 
-function equipmentItem(id: string, name: string, identifier: string, status: string, extra: Row = {}): Row {
+function equipmentItem(id: string, description: string, identifier: string | null, status: string, extra: Row = {}): Row {
   return {
-    id, name, identifier, status, purchase_date: null, vendor_id: null, invoice_path: null, photo_path: null,
-    assigned_to: null, assigned_on: null, created_by: 'e-bilal', created_at: '2025-11-03T09:00:00Z',
-    updated_at: '2025-11-03T09:00:00Z', ...extra,
+    id, description, identifier, status, purchase_date: null, request_date: null, requested_by: null, vendor_id: null,
+    invoice_path: null, photo_path: null, assigned_to: null, assigned_on: null, created_by: 'e-bilal',
+    created_at: '2025-11-03T09:00:00Z', updated_at: '2025-11-03T09:00:00Z', ...extra,
   }
 }
 
 // Sara has the laptop (Bilal had it before her) and a mouse; the monitor is
-// faulty and with nobody; the printer is retired.
+// faulty and with nobody; the printer is retired. Sara has asked for a
+// standing desk (no identifier or purchase date yet).
 const EQUIPMENT: Row[] = [
   equipmentItem('eq-laptop', 'Laptop', 'LT-0042', 'active', {
     purchase_date: '2025-11-03', vendor_id: 'v-tech', invoice_path: 'inv-laptop.pdf', photo_path: 'photo-laptop.jpg',
     assigned_to: 'e-sara', assigned_on: '2026-01-10',
   }),
-  equipmentItem('eq-mouse', 'Mouse', 'MS-3', 'active', { vendor_id: 'v-tech', assigned_to: 'e-sara', assigned_on: '2026-03-02' }),
-  equipmentItem('eq-monitor', 'Monitor', 'MON-7', 'faulty'),
+  equipmentItem('eq-mouse', 'Mouse', 'MS-3', 'active', {
+    purchase_date: '2026-03-01', vendor_id: 'v-tech', assigned_to: 'e-sara', assigned_on: '2026-03-02',
+  }),
+  equipmentItem('eq-monitor', 'Monitor', 'MON-7', 'faulty', { purchase_date: '2025-12-01' }),
   equipmentItem('eq-printer', 'Printer', 'PR-1', 'retired', { vendor_id: 'v-tech' }),
+  equipmentItem('eq-desk', 'Standing desk', null, 'requested', {
+    request_date: '2026-06-05', requested_by: 'e-sara', created_by: 'e-sara', created_at: '2026-06-05T09:00:00Z',
+  }),
 ]
 
 const EQUIPMENT_ASSIGNMENTS: Row[] = [
@@ -851,7 +857,10 @@ function insertDefaults(table: Table, row: Row): Row {
     return { employee_number: Math.max(0, ...rowsIn(table).map((e) => Number(e.employee_number))) + 1, ...row }
   // equipment_guard stamps the creator; nobody has it yet.
   if (table === 'equipment')
-    return { assigned_to: null, assigned_on: null, created_by: authState.bound?.id, updated_at: new Date().toISOString(), ...row }
+    return {
+      assigned_to: null, assigned_on: null, requested_by: null, created_by: authState.bound?.id,
+      updated_at: new Date().toISOString(), ...row,
+    }
   return row
 }
 
@@ -1003,7 +1012,7 @@ const test = (row: Row, [col, op, value]: Filter) => {
 class Query implements PromiseLike<Result> {
   private filters: Filter[] = []
   private columns = '*'
-  private sort: { col: string; ascending: boolean } | null = null
+  private sort: { col: string; ascending: boolean; nullsFirst: boolean } | null = null
   private mode: 'many' | 'single' | 'maybeSingle' = 'many'
   private returning = false
   private counting = false
@@ -1032,8 +1041,9 @@ class Query implements PromiseLike<Result> {
   lte = (col: string, value: unknown) => this.where(col, 'lte', value)
   is = (col: string, value: null) => this.where(col, 'is', value)
   'in' = (col: string, values: unknown[]) => this.where(col, 'in', values)
-  order(col: string, { ascending = true } = {}) {
-    this.sort = { col, ascending }
+  // Nulls go last ascending and first descending, as in Postgres, unless said.
+  order(col: string, { ascending = true, nullsFirst = !ascending }: { ascending?: boolean; nullsFirst?: boolean } = {}) {
+    this.sort = { col, ascending, nullsFirst }
     return this
   }
   single() {
@@ -1082,9 +1092,10 @@ class Query implements PromiseLike<Result> {
     }
 
     if (this.sort) {
-      const { col, ascending } = this.sort
+      const { col, ascending, nullsFirst } = this.sort
       rows = [...rows].sort((a, b) => {
         const x = a[col] as string | number, y = b[col] as string | number
+        if (x == null || y == null) return x == null && y == null ? 0 : (x == null) === nullsFirst ? -1 : 1
         return (x < y ? -1 : x > y ? 1 : 0) * (ascending ? 1 : -1)
       })
     }
@@ -1429,7 +1440,7 @@ const RPCS: Record<string, (args: Row) => unknown> = {
       id: `new-${nextId++}`, equipment_id: id, employee_id: who, assigned_on: on, assigned_by: me,
       unassigned_on: null, unassigned_by: null, created_at: new Date().toISOString(),
     })
-    Object.assign(item, { assigned_to: who, assigned_on: on })
+    Object.assign(item, { assigned_to: who, assigned_on: on, status: item.status === 'requested' ? 'active' : item.status })
     return null
   },
 
@@ -1486,12 +1497,34 @@ const RPCS: Record<string, (args: Row) => unknown> = {
       }))
   },
 
-  // The caller's equipment: name, identifier and date only, newest first.
+  // The caller's equipment: description, identifier and date only, newest
+  // first (and name, the previous build's copy of description).
   my_equipment: () =>
     rowsIn('equipment')
       .filter((e) => e.assigned_to === authState.bound?.id)
       .sort((a, b) => String(b.assigned_on).localeCompare(String(a.assigned_on)))
-      .map((e) => ({ name: e.name, identifier: e.identifier, assigned_on: e.assigned_on })),
+      .map((e) => ({ description: e.description, identifier: e.identifier, assigned_on: e.assigned_on, name: e.description })),
+
+  // A request for the caller, dated today (the frozen date in tests).
+  equipment_request: ({ p_description: description }) => {
+    const now = new Date()
+    const id = `new-${nextId++}`
+    rowsIn('equipment').push(
+      equipmentItem(id, String(description).trim(), null, 'requested', {
+        request_date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+        requested_by: authState.bound?.id, created_by: authState.bound?.id, created_at: now.toISOString(),
+      }),
+    )
+    return id
+  },
+
+  // The caller's requests nobody has had yet, newest first.
+  my_equipment_requests: () =>
+    rowsIn('equipment')
+      .filter((e) => e.requested_by === authState.bound?.id && !e.assigned_to &&
+        !rowsIn('equipment_assignments').some((a) => a.equipment_id === e.id))
+      .sort((a, b) => String(b.request_date).localeCompare(String(a.request_date)))
+      .map((e) => ({ id: e.id, description: e.description, request_date: e.request_date })),
 
   public_branding: () => {
     const b = rowsIn('branding')[0]

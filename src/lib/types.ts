@@ -546,14 +546,21 @@ export interface Vendor {
 
 export type EquipmentStatus = 'requested' | 'active' | 'faulty' | 'retired' | 'sold'
 
-// Operations → Equipment.
+// Operations → Equipment. An employee's request is a row in status
+// requested, made by equipment_request. (The table's legacy name column
+// mirrors description for the previous build; the app doesn't read it.)
 export interface Equipment {
   id: string
-  name: string
-  // Typed in by hand; unique, ignoring case.
-  identifier: string
+  // One line, up to 150 characters.
+  description: string
+  // Typed in by hand; unique, ignoring case. Needed before it's assigned.
+  identifier: string | null
   status: EquipmentStatus
+  // Needed before it's assigned.
   purchase_date: string | null
+  request_date: string | null
+  // Who asked for it; set only by equipment_request.
+  requested_by: string | null
   vendor_id: string | null
   // Files in the equipment bucket.
   invoice_path: string | null
@@ -581,9 +588,16 @@ export interface EquipmentAssignment {
 
 // A row of the my_equipment RPC: what the profile shows.
 export interface MyEquipment {
-  name: string
+  description: string
   identifier: string
   assigned_on: string
+}
+
+// A row of the my_equipment_requests RPC: the caller's requests still waiting.
+export interface MyEquipmentRequest {
+  id: string
+  description: string
+  request_date: string | null
 }
 
 export type ReimbursementStatus = 'review' | 'approved' | 'processed' | 'disbursed' | 'rejected' | 'withdrawn'

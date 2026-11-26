@@ -23,13 +23,14 @@ import SearchIcon from '@mui/icons-material/Search'
 import { PageHeader } from '../../components/common'
 import { supabase } from '../../lib/supabase'
 import { EQUIPMENT_STATUS_COLORS, EQUIPMENT_STATUS_LABELS, formatDate } from '../../lib/constants'
-import { EQUIPMENT_SELECT, type EquipmentRow } from '../../lib/equipment'
+import { EQUIPMENT_SELECT, isOpenRequest, type EquipmentRow } from '../../lib/equipment'
 import type { DirectoryEntry, EquipmentStatus } from '../../lib/types'
 
 const STATUSES = Object.keys(EQUIPMENT_STATUS_LABELS) as EquipmentStatus[]
 
 // Operations → Equipment (HR, finance admins, company admins): everything the
-// company owns or has asked for, with who has it. Status filter in ?status=.
+// company owns or has been asked for, with who has it or asked for it, by
+// identifier (requests still without one first). Status filter in ?status=.
 // A row opens the equipment.
 export default function Equipment() {
   const navigate = useNavigate()
@@ -44,7 +45,7 @@ export default function Equipment() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from('equipment').select(EQUIPMENT_SELECT).order('name'),
+      supabase.from('equipment').select(EQUIPMENT_SELECT).order('identifier', { nullsFirst: true }),
       supabase.from('employee_directory').select('id, full_name'),
     ]).then(([equipmentRes, directoryRes]) => {
       const loadError = equipmentRes.error ?? directoryRes.error
@@ -57,7 +58,7 @@ export default function Equipment() {
     })
   }, [])
 
-  const holder = (r: EquipmentRow) => (r.assigned_to ? (people.get(r.assigned_to) ?? '—') : null)
+  const nameOf = (id: string | null) => (id ? (people.get(id) ?? '—') : '—')
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -65,9 +66,8 @@ export default function Equipment() {
       (r) =>
         (!status || r.status === status) &&
         (!q ||
-          [r.name, r.identifier, (r.assigned_to && people.get(r.assigned_to)) || ''].some((v) =>
-            v.toLowerCase().includes(q),
-          )),
+          [r.description, r.identifier, r.assigned_to && people.get(r.assigned_to), isOpenRequest(r) && people.get(r.requested_by!)]
+            .some((v) => typeof v === 'string' && v.toLowerCase().includes(q))),
     )
   }, [rows, people, search, status])
 
@@ -91,7 +91,7 @@ export default function Equipment() {
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
         <TextField
-          placeholder="Search by name, identifier or person"
+          placeholder="Search by identifier, description or person"
           size="small"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -145,11 +145,17 @@ export default function Equipment() {
                   sx={{ cursor: 'pointer', '&:last-child td': { borderBottom: 0 } }}
                 >
                   <TableCell>
-                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                      {r.name}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
-                      {r.identifier}
+                    {r.identifier ? (
+                      <Typography variant="body2" sx={{ fontWeight: 500, fontFamily: 'monospace' }}>
+                        {r.identifier}
+                      </Typography>
+                    ) : (
+                      <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
+                        No identifier yet
+                      </Typography>
+                    )}
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                      {r.description}
                     </Typography>
                   </TableCell>
                   <TableCell>
@@ -163,10 +169,19 @@ export default function Equipment() {
                   <TableCell>
                     {r.assigned_to ? (
                       <>
-                        <Typography variant="body2">{holder(r)}</Typography>
+                        <Typography variant="body2">{nameOf(r.assigned_to)}</Typography>
                         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                           Since {formatDate(r.assigned_on)}
                         </Typography>
+                      </>
+                    ) : isOpenRequest(r) ? (
+                      <>
+                        <Typography variant="body2">Requested by {nameOf(r.requested_by)}</Typography>
+                        {r.request_date && (
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                            On {formatDate(r.request_date)}
+                          </Typography>
+                        )}
                       </>
                     ) : (
                       <Typography variant="body2" sx={{ color: 'text.secondary' }}>
