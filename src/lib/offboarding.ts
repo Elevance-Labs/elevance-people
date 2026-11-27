@@ -1,10 +1,30 @@
 import { todayIso } from './leaves'
-import type { Offboarding, OffboardingTask } from './types'
+import type { EmployeeStatus, Offboarding, OffboardingTask } from './types'
 
 // No employee embed: a manager can't read `employees`, so names come from
 // employee_directory.
 export type OffboardingListRow = Offboarding & { tasks: Pick<OffboardingTask, 'done_at'>[] }
 export const OFFBOARDING_LIST = '*, tasks:offboarding_tasks(done_at)'
+
+// Statuses an offboarding is for, and those going back to which cancels the
+// one in progress (mirror of employees_offboarding).
+export const LEAVING_STATUSES: EmployeeStatus[] = ['notice_period', 'left', 'terminated']
+export const WORKING_STATUSES: EmployeeStatus[] = ['probation', 'extended_probation', 'active']
+
+// The employee's offboardings, newest first, as the employee record reads them.
+export type OffboardingSummary = Pick<Offboarding, 'id' | 'status' | 'started_at'>
+
+// Mirror of offboarding_start (HR): someone on notice, left or terminated,
+// not the viewer, with none in progress and none completed since.
+export const canStartOffboarding = (
+  employee: { id: string; status: EmployeeStatus },
+  offboardings: OffboardingSummary[],
+  viewerId: string | undefined,
+) =>
+  employee.id !== viewerId &&
+  LEAVING_STATUSES.includes(employee.status) &&
+  !offboardings.some((o) => o.status === 'in_progress') &&
+  offboardings[0]?.status !== 'completed'
 
 export type SignOffStep = 'done' | 'waiting' | 'not_needed'
 

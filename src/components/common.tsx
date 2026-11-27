@@ -133,6 +133,7 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
   destructive,
   busy,
   onConfirm,
@@ -142,6 +143,7 @@ export function ConfirmDialog({
   title: string
   message: ReactNode
   confirmLabel?: string
+  cancelLabel?: string
   destructive?: boolean
   busy?: boolean
   onConfirm: () => void
@@ -155,7 +157,7 @@ export function ConfirmDialog({
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose} disabled={busy}>
-          Cancel
+          {cancelLabel}
         </Button>
         <Button
           variant="contained"

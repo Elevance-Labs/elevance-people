@@ -1,8 +1,9 @@
 // Onboarding: hiring an applicant (which creates their employee record and
-// onboarding), HR's Human Resources → Onboarding list and checklist, and the
-// company admins' Configuration → Onboarding checklist. The database decides
-// who may do what (application_hire, the onboarding RPCs, RLS and grants);
-// these checks prove the app asks for the right things.
+// onboarding), starting one from an employee record, HR's Human Resources →
+// Onboarding list and checklist, and the company admins' Configuration →
+// Onboarding checklist. The database decides who may do what
+// (application_hire, the onboarding RPCs, RLS and grants); these checks prove
+// the app asks for the right things.
 import {
   setupDom, reporter, text, button, click, type, choose, dialog, field, options, checkbox, row, waitFor,
   freezeToday, valueOf, navLabels, press,
@@ -411,5 +412,80 @@ check('all departments shows every section', sectionNames().length === 5 && loca
 await mountApp('/configuration/onboarding?department=d-new')
 check('a department with no sections of its own sees those for everyone',
   sectionNames().join() === 'Paperwork,IT setup', sectionNames().join())
+
+// ============================== from the employee record ==============================
+
+// The record's card: where onboarding and offboarding stand.
+const card = () =>
+  [...document.querySelectorAll<HTMLElement>('main .MuiPaper-root')].find(
+    (p) => p.querySelector('.MuiTypography-subtitle1')?.textContent === 'Onboarding and offboarding') ?? null
+
+// A record made by hand, joining by default: HR is offered its onboarding.
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/employees/new')
+await type('Full name', 'Zara Ali')
+await type('Company email', 'zara@elevancelabs.com')
+await type('Date of joining', '2026-07-01')
+await click(button('Create employee'))
+check('creating someone joining offers to start their onboarding',
+  await waitFor(() => dialog()?.textContent?.includes('Start their onboarding?')), dialog()?.textContent)
+check('…saying it is for Zara, with her department\'s checklist',
+  !!dialog()?.textContent?.includes('Zara Ali has no onboarding yet') &&
+  !!dialog()?.textContent?.includes('checklist for their department'))
+await click(button('Not now'))
+check('“Not now” starts nothing', await waitFor(() => !dialog()) && !rpcArgs('onboarding_start').length)
+check('…and the record still offers it',
+  !!card()?.textContent?.includes('OnboardingNone') && !!button('Start onboarding', card()!), card()?.textContent)
+await click(button('Start onboarding', card()!))
+check('the button asks first', !!dialog()?.textContent?.includes('Start their onboarding?'))
+const zara = table('employees').find((e) => e.full_name === 'Zara Ali')!
+await click(button('Start onboarding', dialog()!))
+check('starting sends onboarding_start for that employee',
+  rpcArgs('onboarding_start').join() === JSON.stringify({ p_employee_id: zara.id }), rpcArgs('onboarding_start').join())
+const zaraOnboarding = table('onboardings').find((o) => o.employee_id === zara.id)
+check('…which is due the day after she joins', zaraOnboarding?.due_date === '2026-07-02', String(zaraOnboarding?.due_date))
+check('…and the record shows it in progress, linking to it',
+  await waitFor(() => card()?.textContent?.includes('In progress')) &&
+  !!card()?.querySelector(`a[href*="/hr/onboarding/${zaraOnboarding?.id}"]`) && !button('Start onboarding', card()!))
+check('…and says so', text().includes('Onboarding started'))
+
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/employees/new')
+await type('Full name', 'Zara Ali')
+await type('Company email', 'zara@elevancelabs.com')
+await type('Date of joining', '2026-07-01')
+await choose('Status', 'Active')
+await click(button('Create employee'))
+await waitFor(() => location.pathname.startsWith('/employees/new-') && card())
+check('creating someone already active offers no onboarding', !dialog() && !button('Start onboarding'), dialog()?.textContent)
+
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/employees/e-sara')
+check('an employee with an onboarding links to it, with no start',
+  await waitFor(() => card()?.textContent?.includes('In progress')) &&
+  !!card()?.querySelector('a[href*="/hr/onboarding/ob-sara"]') && !button('Start onboarding'), card()?.textContent)
+
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/employees/e-amna')
+check('someone active without one is not offered an onboarding',
+  await waitFor(() => card()?.textContent?.includes('OnboardingNone')) && !button('Start onboarding'), card()?.textContent)
+
+// Someone joining whose record was made by hand, before this offer existed.
+reset()
+signInAs(PEOPLE.hr)
+table('employees').find((e) => e.id === 'e-sara')!.status = 'joining'
+table('onboardings').splice(table('onboardings').findIndex((o) => o.id === 'ob-sara'), 1)
+await mountApp('/employees/e-sara')
+check('opening someone joining without an onboarding offers to start it, but does not ask',
+  await waitFor(() => button('Start onboarding', card()!)) && !dialog())
+failNext('rpc.onboarding_start', { message: 'They already have an onboarding.' })
+await click(button('Start onboarding', card()!))
+await click(button('Start onboarding', dialog()!))
+check('a refused start is shown on the card', await waitFor(() => card()?.textContent?.includes('They already have an onboarding.')),
+  card()?.textContent)
 
 done()

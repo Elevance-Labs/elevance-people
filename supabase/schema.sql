@@ -558,7 +558,8 @@ create table public.onboarding_template_tasks (
 );
 create index onboarding_template_tasks_section_idx on public.onboarding_template_tasks (section_id, sort_order);
 
--- Onboardings: written only by application_hire and the onboarding functions.
+-- Onboardings: written only by application_hire, onboarding_start and the
+-- onboarding functions.
 create table public.onboardings (
   id             uuid primary key default gen_random_uuid(),
   employee_id    uuid not null,
@@ -635,8 +636,9 @@ create table public.offboarding_template_tasks (
 );
 create index offboarding_template_tasks_section_idx on public.offboarding_template_tasks (section_id, sort_order);
 
--- Offboardings: written only by employees_offboarding and the offboarding
--- functions. At most one in progress per employee; closed ones are kept.
+-- Offboardings: written only by employees_offboarding, offboarding_start and
+-- the offboarding functions. At most one in progress per employee; closed ones
+-- are kept.
 create table public.offboardings (
   id                uuid primary key default gen_random_uuid(),
   employee_id       uuid not null,
@@ -2599,6 +2601,36 @@ begin
 end;
 $$;
 
+-- HR starts an onboarding for someone joining who has none (a record made by
+-- hand rather than by a hire): due the day after joining, with the checklist.
+create function public.onboarding_start(p_employee_id uuid)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare
+  v_employee   public.employees;
+  v_onboarding uuid;
+begin
+  if not public.is_hr() then
+    raise exception 'Only HR can start an onboarding.' using errcode = '42501';
+  end if;
+  select * into v_employee from public.employees where id = p_employee_id for update;
+  if not found then
+    raise exception 'Employee not found.' using errcode = 'P0002';
+  end if;
+  if v_employee.status <> 'joining' then
+    raise exception 'Only someone joining can be onboarded.';
+  end if;
+  if exists (select 1 from public.onboardings o where o.employee_id = p_employee_id) then
+    raise exception 'They already have an onboarding.' using errcode = '23505';
+  end if;
+  insert into public.onboardings (employee_id, due_date, created_by)
+  values (p_employee_id, v_employee.date_of_joining + 1, public.current_employee_id())
+  returning id into v_onboarding;
+  -- The checklist: sections for everyone, and those for their department.
+  perform public.onboarding_sync(v_onboarding);
+  return v_onboarding;
+end;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Offboarding actions. The checklist's order changes only through the
 -- reorder functions (company admins); an offboarding only through the rest.
@@ -2612,7 +2644,8 @@ returns boolean language sql stable security definer set search_path = '' as $$
 $$;
 
 -- Starts an offboarding, with a copy of the checklist, when someone is put on
--- notice; cancels the one under way if they go back to working.
+-- notice; cancels the one under way if they go back to working (from notice,
+-- left or terminated).
 create function public.employees_offboarding()
 returns trigger language plpgsql security definer set search_path = '' as $$
 declare
@@ -2627,10 +2660,12 @@ begin
     returning id into v_offboarding;
     -- The checklist: sections for everyone, and those for their department.
     perform public.offboarding_sync(v_offboarding);
-  elsif tg_op = 'UPDATE' and old.status = 'notice_period' and public.is_login_status(new.status) then
+  elsif tg_op = 'UPDATE' and old.status in ('notice_period', 'left', 'terminated')
+        and new.status in ('probation', 'extended_probation', 'active') then
     update public.offboardings
        set status = 'cancelled', cancelled_by = public.current_employee_id(), cancelled_at = now(),
-           cancel_reason = 'Back to ' || replace(new.status::text, '_', ' ') || ' from notice period.'
+           cancel_reason = 'Back to ' || replace(new.status::text, '_', ' ')
+                           || ' from ' || replace(old.status::text, '_', ' ') || '.'
      where employee_id = new.id and status = 'in_progress';
   end if;
   return null;
@@ -2640,6 +2675,43 @@ $$;
 create trigger employees_offboarding
   after insert or update of status on public.employees
   for each row execute function public.employees_offboarding();
+
+-- HR starts an offboarding for someone on notice, left or terminated who has
+-- none in progress and none completed since (never their own): the last
+-- working day is their date of separation, the reason terminated if they were.
+create function public.offboarding_start(p_employee_id uuid)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare
+  v_employee    public.employees;
+  v_offboarding uuid;
+begin
+  if not public.is_hr() then
+    raise exception 'Only HR can start an offboarding.' using errcode = '42501';
+  end if;
+  select * into v_employee from public.employees where id = p_employee_id for update;
+  if not found or not public.can_work_offboarding(p_employee_id) then
+    raise exception 'Employee not found.' using errcode = 'P0002';
+  end if;
+  if v_employee.status not in ('notice_period', 'left', 'terminated') then
+    raise exception 'Only someone on notice, left or terminated can be offboarded.';
+  end if;
+  if exists (select 1 from public.offboardings o
+              where o.employee_id = p_employee_id and o.status = 'in_progress') then
+    raise exception 'Their offboarding is already in progress.' using errcode = '23505';
+  end if;
+  if (select o.status from public.offboardings o where o.employee_id = p_employee_id
+       order by o.started_at desc limit 1) = 'completed' then
+    raise exception 'They have already been offboarded.' using errcode = '23505';
+  end if;
+  insert into public.offboardings (employee_id, reason, last_working_day, started_by)
+  values (p_employee_id, case when v_employee.status = 'terminated' then 'terminated'::public.offboarding_reason end,
+          v_employee.date_of_separation, public.current_employee_id())
+  returning id into v_offboarding;
+  -- The checklist: sections for everyone, and those for their department.
+  perform public.offboarding_sync(v_offboarding);
+  return v_offboarding;
+end;
+$$;
 
 -- Each reorder takes every id, in the new order, so a stale list is refused
 -- rather than half applied.
@@ -4430,7 +4502,7 @@ revoke execute on function
   public.onboarding_reorder_sections(uuid[]), public.onboarding_reorder_tasks(uuid, uuid[]),
   public.application_hire(uuid, text, date, text), public.can_see_onboarding(uuid),
   public.onboarding_task_set(uuid, boolean),
-  public.onboarding_complete(uuid), public.onboarding_cancel(uuid, text),
+  public.onboarding_complete(uuid), public.onboarding_cancel(uuid, text), public.onboarding_start(uuid),
   public.can_tick_checklist_task(uuid), public.onboarding_sync(uuid), public.offboarding_sync(uuid),
   public.onboarding_checklist_changed(), public.offboarding_checklist_changed(), public.employees_checklists(),
   public.offboarding_template_sections_stamp(), public.offboarding_template_tasks_stamp(),
@@ -4438,7 +4510,7 @@ revoke execute on function
   public.offboarding_reorder_sections(uuid[]), public.offboarding_reorder_tasks(uuid, uuid[]),
   public.offboarding_set_details(uuid, public.offboarding_reason, date),
   public.offboarding_task_set(uuid, boolean), public.offboarding_sign_off(uuid),
-  public.offboarding_cancel(uuid, text),
+  public.offboarding_cancel(uuid, text), public.offboarding_start(uuid),
   public.is_finance(), public.can_manage_payroll(), public.payroll_items_guard(),
   public.payroll_create(integer, integer), public.payroll_move(uuid, public.payroll_status),
   public.salary_on(uuid, date), public.salary_revisions_guard(),
@@ -4486,12 +4558,12 @@ grant execute on function
   public.onboarding_reorder_sections(uuid[]), public.onboarding_reorder_tasks(uuid, uuid[]),
   public.application_hire(uuid, text, date, text), public.can_see_onboarding(uuid),
   public.onboarding_task_set(uuid, boolean),
-  public.onboarding_complete(uuid), public.onboarding_cancel(uuid, text),
+  public.onboarding_complete(uuid), public.onboarding_cancel(uuid, text), public.onboarding_start(uuid),
   public.can_work_offboarding(uuid),
   public.offboarding_reorder_sections(uuid[]), public.offboarding_reorder_tasks(uuid, uuid[]),
   public.offboarding_set_details(uuid, public.offboarding_reason, date),
   public.offboarding_task_set(uuid, boolean), public.offboarding_sign_off(uuid),
-  public.offboarding_cancel(uuid, text),
+  public.offboarding_cancel(uuid, text), public.offboarding_start(uuid),
   public.is_finance(), public.can_manage_payroll(),
   public.payroll_create(integer, integer), public.payroll_move(uuid, public.payroll_status),
   public.salary_revision_move(uuid, public.salary_revision_status, text), public.my_salaries(),

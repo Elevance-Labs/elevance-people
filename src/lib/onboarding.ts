@@ -1,5 +1,5 @@
 import { todayIso } from './leaves'
-import type { Employee, Onboarding, OnboardingTask } from './types'
+import type { Employee, EmployeeStatus, Onboarding, OnboardingTask } from './types'
 
 export type OnboardingWithEmployee = Onboarding & {
   employee: Pick<Employee, 'full_name' | 'company_email' | 'date_of_joining'> | null
@@ -13,6 +13,10 @@ export const ONBOARDING_WITH_EMPLOYEE = `*, ${EMPLOYEE}`
 // The list also needs each onboarding's progress.
 export type OnboardingListRow = OnboardingWithEmployee & { tasks: Pick<OnboardingTask, 'done_at'>[] }
 export const ONBOARDING_LIST = `*, ${EMPLOYEE}, tasks:onboarding_tasks(done_at)`
+
+// Mirror of onboarding_start (HR): someone joining who has no onboarding yet.
+export const canStartOnboarding = (status: EmployeeStatus, onboarding: Pick<Onboarding, 'id'> | null) =>
+  status === 'joining' && !onboarding
 
 export const isOverdue = (o: Pick<Onboarding, 'status' | 'due_date'>) =>
   o.status === 'in_progress' && o.due_date < todayIso()

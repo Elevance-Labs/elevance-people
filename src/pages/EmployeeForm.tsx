@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Box,
   Button,
+  Chip,
   CircularProgress,
   Grid,
   InputAdornment,
@@ -28,11 +29,21 @@ import {
   COMPANY_DOMAIN,
   EMPLOYMENT_TYPE_LABELS,
   LOGIN_METHOD_LABELS,
+  ONBOARDING_STATUS_COLORS,
+  ONBOARDING_STATUS_LABELS,
   STATUS_LABELS,
+  formatDate,
   formatEmployeeNumber,
 } from '../lib/constants'
+import { canStartOnboarding } from '../lib/onboarding'
+import {
+  LEAVING_STATUSES,
+  WORKING_STATUSES,
+  canStartOffboarding,
+  type OffboardingSummary,
+} from '../lib/offboarding'
 import { PASSWORD_MIN_LENGTH, generatePassword, setEmployeePassword } from '../lib/passwordLogin'
-import type { Department, Designation, Employee } from '../lib/types'
+import type { Department, Designation, Employee, Onboarding } from '../lib/types'
 
 const EMPTY = {
   employee_number: '',
@@ -109,6 +120,27 @@ function Cell({ wide, children }: { wide?: boolean; children: ReactNode }) {
   return <Grid size={wide ? 12 : { xs: 12, sm: 6, md: 4 }}>{children}</Grid>
 }
 
+// The employee's onboarding (at most one) and offboardings, newest first.
+type Checklists = { onboarding: Pick<Onboarding, 'id' | 'status'> | null; offboardings: OffboardingSummary[] }
+type Kind = 'onboarding' | 'offboarding'
+
+async function loadChecklists(employeeId: string): Promise<Checklists | string> {
+  const [onboarding, offboardings] = await Promise.all([
+    supabase.from('onboardings').select('id, status').eq('employee_id', employeeId).maybeSingle(),
+    supabase
+      .from('offboardings')
+      .select('id, status, started_at')
+      .eq('employee_id', employeeId)
+      .order('started_at', { ascending: false }),
+  ])
+  const failure = onboarding.error ?? offboardings.error
+  if (failure) return failure.message
+  return {
+    onboarding: onboarding.data as Checklists['onboarding'],
+    offboardings: offboardings.data as OffboardingSummary[],
+  }
+}
+
 // On an existing record the documents get their own tab, kept in the URL
 // (?tab=documents) so it can be linked to.
 const TABS = [
@@ -126,16 +158,24 @@ const options = (labels: Record<string, string>) =>
 export default function EmployeeForm() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const [params, setParams] = useSearchParams()
   const tab = TABS.find((t) => t.value === params.get('tab')) ?? TABS[0]
-  const { isCompanyAdmin } = useAuth()
+  const { isCompanyAdmin, employee: me } = useAuth()
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY)
   const [loading, setLoading] = useState(!!id)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [checklists, setChecklists] = useState<Checklists | null>(null)
+  const [checklistError, setChecklistError] = useState<string | null>(null)
+  // Offering to start an onboarding or offboarding: after creating someone
+  // joining, after a status change to notice, left or terminated, or from
+  // the buttons on the record.
+  const [offer, setOffer] = useState<Kind | null>(null)
+  const [starting, setStarting] = useState(false)
   const [departments, setDepartments] = useState<Department[]>([])
   const [designations, setDesignations] = useState<Designation[]>([])
 
@@ -159,27 +199,39 @@ export default function EmployeeForm() {
   const password = form.login_method === 'password'
 
   useEffect(() => {
+    setChecklists(null)
+    setChecklistError(null)
     if (!id) {
       setEmployee(null)
       setForm(EMPTY)
       return
     }
     setLoading(true)
-    supabase
-      .from('employees')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle()
-      .then(({ data, error: loadError }) => {
+    Promise.all([supabase.from('employees').select('*').eq('id', id).maybeSingle(), loadChecklists(id)]).then(
+      ([{ data, error: loadError }, lists]) => {
         if (loadError) setError(loadError.message)
         else if (!data) setError('Employee not found.')
         else {
           setEmployee(data as Employee)
           setForm(toForm(data as Employee))
         }
+        if (typeof lists === 'string') setChecklistError(lists)
+        else setChecklists(lists)
         setLoading(false)
-      })
+      },
+    )
   }, [id])
+
+  // A record just created arrives with { offer: 'onboarding' }: offered once,
+  // then the state is dropped so a reload doesn't offer it again.
+  const requested = (location.state as { offer?: Kind } | null)?.offer
+  useEffect(() => {
+    if (!requested || !employee || !checklists) return
+    if (requested === 'onboarding' && canStartOnboarding(employee.status, checklists.onboarding)) setOffer('onboarding')
+    navigate(`${location.pathname}${location.search}`, { replace: true })
+  }, [requested, employee, checklists, navigate, location.pathname, location.search])
+
+  const offboardingInProgress = !!checklists?.offboardings.some((o) => o.status === 'in_progress')
 
   const field = (name: FieldName, label: string, props: TextFieldProps = {}): TextFieldProps => ({
     label,
@@ -213,13 +265,43 @@ export default function EmployeeForm() {
     setBusy(false)
     if (saveError) return setError(friendlyError(saveError, form))
 
+    const saved = data as Employee
     if (id) {
-      setEmployee(data as Employee)
-      setForm(toForm(data as Employee))
-      setSaved(true)
+      const statusBefore = employee?.status
+      setEmployee(saved)
+      setForm(toForm(saved))
+      setNotice('Changes saved')
+      // A status change may have started or cancelled an offboarding; and
+      // someone now leaving without one is offered it.
+      if (saved.status !== statusBefore) {
+        const lists = await loadChecklists(saved.id)
+        if (typeof lists === 'string') return setChecklistError(lists)
+        setChecklists(lists)
+        if (LEAVING_STATUSES.includes(saved.status) && canStartOffboarding(saved, lists.offboardings, me?.id))
+          setOffer('offboarding')
+      }
     } else {
-      navigate(`/employees/${(data as Employee).id}`, { replace: true })
+      navigate(`/employees/${saved.id}`, {
+        replace: true,
+        state: canStartOnboarding(saved.status, null) ? { offer: 'onboarding' } : undefined,
+      })
     }
+  }
+
+  async function start(kind: Kind) {
+    if (!employee) return
+    setStarting(true)
+    setChecklistError(null)
+    const { error: startError } = await supabase.rpc(kind === 'onboarding' ? 'onboarding_start' : 'offboarding_start', {
+      p_employee_id: employee.id,
+    })
+    const lists = startError ? null : await loadChecklists(employee.id)
+    setStarting(false)
+    setOffer(null)
+    if (startError) return setChecklistError(startError.message)
+    if (typeof lists === 'string') setChecklistError(lists)
+    else if (lists) setChecklists(lists)
+    setNotice(kind === 'onboarding' ? 'Onboarding started' : 'Offboarding started')
   }
 
   async function remove() {
@@ -426,9 +508,12 @@ export default function EmployeeForm() {
                       select: true,
                       // Mirrors employees_offboarding.
                       helperText:
-                        form.status === 'notice_period' && employee?.status !== 'notice_period'
+                        form.status === 'notice_period' && employee?.status !== 'notice_period' && !offboardingInProgress
                           ? 'Saving starts their offboarding'
-                          : employee?.status === 'notice_period' && ['probation', 'extended_probation', 'active'].includes(form.status)
+                          : employee &&
+                              offboardingInProgress &&
+                              LEAVING_STATUSES.includes(employee.status) &&
+                              WORKING_STATUSES.includes(form.status as Employee['status'])
                             ? 'Saving cancels their offboarding'
                             : undefined,
                     })}
@@ -518,6 +603,16 @@ export default function EmployeeForm() {
             </Stack>
           </Box>
 
+          {employee && (checklists || checklistError) && (
+            <ChecklistsCard
+              employee={employee}
+              checklists={checklists}
+              viewerId={me?.id}
+              error={checklistError}
+              onStart={setOffer}
+            />
+          )}
+
           {employee && isCompanyAdmin && employee.login_method === 'password' && (
             <PasswordLogin employee={employee} />
           )}
@@ -540,14 +635,117 @@ export default function EmployeeForm() {
         onConfirm={remove}
         onClose={() => setConfirmDelete(false)}
       />
+      <ConfirmDialog
+        open={!!offer}
+        title={offer === 'onboarding' ? 'Start their onboarding?' : 'Start their offboarding?'}
+        message={
+          offer === 'onboarding'
+            ? `${employee?.full_name} has no onboarding yet. Start one with the onboarding checklist for their department? It is due the day after they join.`
+            : `${employee?.full_name} has no offboarding in progress. Start one with the offboarding checklist for their department?` +
+              (employee?.date_of_separation
+                ? ` Their last working day will be their date of separation, ${formatDate(employee.date_of_separation)}.`
+                : ' HR then sets the reason and last working day.')
+        }
+        confirmLabel={offer === 'onboarding' ? 'Start onboarding' : 'Start offboarding'}
+        cancelLabel="Not now"
+        busy={starting}
+        onConfirm={() => offer && start(offer)}
+        onClose={() => setOffer(null)}
+      />
       <Snackbar
-        open={saved}
+        open={!!notice}
         autoHideDuration={3000}
-        onClose={() => setSaved(false)}
-        message="Changes saved"
+        onClose={() => setNotice(null)}
+        message={notice}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       />
     </Box>
+  )
+}
+
+// Where the employee's onboarding and latest offboarding stand, with a link to
+// each, and a button to start one where none exists yet.
+function ChecklistsCard({
+  employee,
+  checklists,
+  viewerId,
+  error,
+  onStart,
+}: {
+  employee: Employee
+  checklists: Checklists | null
+  viewerId: string | undefined
+  error: string | null
+  onStart: (kind: Kind) => void
+}) {
+  const rows = checklists
+    ? [
+        {
+          kind: 'onboarding' as const,
+          label: 'Onboarding',
+          item: checklists.onboarding,
+          canStart: canStartOnboarding(employee.status, checklists.onboarding),
+        },
+        {
+          kind: 'offboarding' as const,
+          label: 'Offboarding',
+          item: checklists.offboardings[0] ?? null,
+          canStart: canStartOffboarding(employee, checklists.offboardings, viewerId),
+        },
+      ]
+    : []
+  return (
+    <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+        Onboarding and offboarding
+      </Typography>
+      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+        Their checklists under Human Resources.
+      </Typography>
+      <Stack spacing={1.5}>
+        {rows.map((r) => (
+          <Stack
+            key={r.kind}
+            direction="row"
+            spacing={1.5}
+            useFlexGap
+            sx={{ alignItems: 'center', flexWrap: 'wrap' }}
+          >
+            <Typography variant="body2" sx={{ fontWeight: 500, minWidth: 96 }}>
+              {r.label}
+            </Typography>
+            <Box sx={{ flexGrow: 1 }}>
+              {r.item ? (
+                <Chip
+                  size="small"
+                  label={ONBOARDING_STATUS_LABELS[r.item.status]}
+                  color={ONBOARDING_STATUS_COLORS[r.item.status]}
+                />
+              ) : (
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  None
+                </Typography>
+              )}
+            </Box>
+            {r.item && (
+              <Button size="small" component={Link} to={`/hr/${r.kind}/${r.item.id}`}>
+                Open
+              </Button>
+            )}
+            {r.canStart && (
+              <Button size="small" variant="outlined" onClick={() => onStart(r.kind)}>
+                Start {r.kind}
+              </Button>
+            )}
+          </Stack>
+        ))}
+      </Stack>
+      {error && (
+        <Alert severity="error" sx={{ mt: 2 }}>
+          {error}
+        </Alert>
+      )}
+    </Paper>
   )
 }
 

@@ -1,10 +1,10 @@
 // Offboarding: Human Resources → Offboarding (HR, and managers for their
-// reports), one offboarding's checklist, details and sign-off, the dashboard's
-// reminders, the employee form's hint, and the company admins' Configuration →
-// Offboarding checklist. The database decides who may do what (the
-// employees_offboarding trigger, the offboarding RPCs, RLS and grants); these
-// checks prove the app offers only what that allows and sends exactly what it
-// should.
+// reports), one offboarding's checklist, details and sign-off, the
+// dashboard's reminders, the employee form's hint and offer to start one, and
+// the company admins' Configuration → Offboarding checklist. The database
+// decides who may do what (the employees_offboarding trigger, the offboarding
+// RPCs, RLS and grants); these checks prove the app offers only what that
+// allows and sends exactly what it should.
 import { setupDom, reporter, text, button, click, type, choose, dialog, row, waitFor, freezeToday, field, press } from './setup'
 setupDom()
 freezeToday('2026-06-10')
@@ -160,12 +160,83 @@ check('with a task left, there is nothing to sign', !text().includes('waiting fo
 
 // ============================== the employee form ==============================
 
+// The record's card: where onboarding and offboarding stand.
+const card = () =>
+  [...document.querySelectorAll<HTMLElement>('main .MuiPaper-root')].find(
+    (p) => p.querySelector('.MuiTypography-subtitle1')?.textContent === 'Onboarding and offboarding') ?? null
+const cancelSaras = () => Object.assign(table('offboardings').find((o) => o.id === 'off-sara')!,
+  { status: 'cancelled', cancel_reason: 'Stayed on.' })
+
 reset()
 signInAs(PEOPLE.hr)
+await mountApp('/employees/e-sara')
+check('the record links to the offboarding in progress, with no start',
+  await waitFor(() => card()?.textContent?.includes('In progress')) &&
+  !!card()?.querySelector('a[href*="/hr/offboarding/off-sara"]') && !button('Start offboarding'), card()?.textContent)
+await choose('Status', 'Notice period')
+check('with one already in progress, notice starts no other', !field('Status')?.textContent?.includes('Saving starts'),
+  field('Status')?.textContent)
+await choose('Status', 'Left')
+await click(button('Save changes'))
+await waitFor(() => text().includes('Changes saved'))
+check('…and setting them left offers none', !dialog(), dialog()?.textContent)
+
+reset()
+signInAs(PEOPLE.hr)
+cancelSaras()
 await mountApp('/employees/e-sara')
 await choose('Status', 'Notice period')
 check('putting someone on notice says it starts their offboarding',
   field('Status')?.textContent?.includes('Saving starts their offboarding'), field('Status')?.textContent)
+await click(button('Save changes'))
+check('…which it does, so nothing is offered',
+  await waitFor(() => card()?.textContent?.includes('In progress')) && !dialog() && !rpcArgs('offboarding_start').length,
+  card()?.textContent)
+
+reset()
+signInAs(PEOPLE.hr)
+cancelSaras()
+await mountApp('/employees/e-sara')
+check('a cancelled offboarding is shown, and someone working is not offered one',
+  await waitFor(() => card()?.textContent?.includes('Cancelled')) && !button('Start offboarding'), card()?.textContent)
+await choose('Status', 'Left')
+await click(button('Save changes'))
+check('setting someone left with no offboarding offers to start one',
+  await waitFor(() => dialog()?.textContent?.includes('Start their offboarding?')), dialog()?.textContent)
+check('…saying HR sets the reason and last day, with no date of separation',
+  !!dialog()?.textContent?.includes('HR then sets the reason and last working day'))
+await click(button('Not now'))
+check('“Not now” starts nothing, and the record still offers it',
+  await waitFor(() => !dialog()) && !rpcArgs('offboarding_start').length && !!button('Start offboarding', card()!))
+await click(button('Start offboarding', card()!))
+await click(button('Start offboarding', dialog()!))
+check('starting sends offboarding_start for that employee',
+  rpcArgs('offboarding_start').join() === JSON.stringify({ p_employee_id: 'e-sara' }), rpcArgs('offboarding_start').join())
+const started = table('offboardings').find((o) => o.employee_id === 'e-sara' && o.status === 'in_progress')
+check('…and the record links to the new one', await waitFor(() => card()?.textContent?.includes('In progress')) &&
+  !!card()?.querySelector(`a[href*="/hr/offboarding/${started?.id}"]`) && !button('Start offboarding', card()!),
+  card()?.textContent)
+check('…and says so', text().includes('Offboarding started'))
+await choose('Status', 'Active')
+check('back to active from left says it cancels the offboarding',
+  field('Status')?.textContent?.includes('Saving cancels their offboarding'), field('Status')?.textContent)
+
+reset()
+signInAs(PEOPLE.hr)
+cancelSaras()
+await mountApp('/employees/e-sara')
+await choose('Status', 'Terminated')
+await type('Date of separation', '2026-06-30')
+await click(button('Save changes'))
+check('setting someone terminated offers it too, from their date of separation',
+  await waitFor(() => dialog()?.textContent?.includes('Their last working day will be their date of separation')),
+  dialog()?.textContent)
+
+reset()
+signInAs(PEOPLE.hr)
+await mountApp('/employees/e-omar')
+check('someone already offboarded shows it completed, and is not offered another',
+  await waitFor(() => card()?.textContent?.includes('Completed')) && !button('Start offboarding'), card()?.textContent)
 
 reset()
 signInAs(PEOPLE.hr)

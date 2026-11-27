@@ -788,6 +788,36 @@ function blankAnswers(assignmentId: string, cycleId: string) {
     })
 }
 
+// A new offboarding with the checklist for the employee's department.
+function startOffboarding(e: Row, extra: Row = {}) {
+  const id = `new-${nextId++}`
+  rowsIn('offboardings').push(offboarding(id, String(e.id), 'in_progress', {
+    last_working_day: e.date_of_separation ?? null, started_by: authState.bound?.id, started_at: new Date().toISOString(), ...extra,
+  }))
+  for (const s of rowsIn('offboarding_template_sections')
+    .filter((x) => x.department_id === null || x.department_id === e.department_id)) {
+    for (const t of rowsIn('offboarding_template_tasks').filter((x) => x.section_id === s.id))
+      rowsIn('offboarding_tasks').push({
+        ...offboardingTask(`new-${nextId++}`, id, String(s.name), Number(s.sort_order), String(t.title), Number(t.sort_order)),
+        department_id: s.department_id ?? null, template_task_id: t.id,
+      })
+  }
+  return id
+}
+
+// employees_offboarding: on notice starts one (unless one is in progress);
+// back to working from notice, left or terminated cancels it.
+function employeesOffboarding(e: Row, before: Row | null) {
+  const open = rowsIn('offboardings').find((o) => o.employee_id === e.id && o.status === 'in_progress')
+  if (e.status === 'notice_period' && before?.status !== 'notice_period' && !open) startOffboarding(e)
+  else if (open && ['notice_period', 'left', 'terminated'].includes(String(before?.status)) &&
+    ['probation', 'extended_probation', 'active'].includes(String(e.status)))
+    Object.assign(open, {
+      status: 'cancelled', cancelled_by: authState.bound?.id, cancelled_at: new Date().toISOString(),
+      cancel_reason: `Back to ${String(e.status).replace('_', ' ')} from ${String(before?.status).replace('_', ' ')}.`,
+    })
+}
+
 // Column defaults the database's triggers would set on insert.
 function insertDefaults(table: Table, row: Row): Row {
   const last = (rows: Row[]) => Math.max(-1, ...rows.map((r) => Number(r.sort_order))) + 1
@@ -1080,10 +1110,15 @@ class Query implements PromiseLike<Result> {
       case 'insert':
         rows = input.map((r) => ({ id: `new-${nextId++}`, created_at: new Date().toISOString(), ...insertDefaults(this.name, r) }))
         rowsIn(this.name).push(...rows)
+        if (this.name === 'employees') for (const r of rows) employeesOffboarding(r, null)
         break
       case 'update':
         rows = rowsIn(this.name).filter(this.matches)
-        for (const r of rows) Object.assign(r, input[0])
+        for (const r of rows) {
+          const before = { ...r }
+          Object.assign(r, input[0])
+          if (this.name === 'employees') employeesOffboarding(r, before)
+        }
         break
       case 'delete':
         rows = rowsIn(this.name).filter(this.matches)
@@ -1294,6 +1329,30 @@ const RPCS: Record<string, (args: Row) => unknown> = {
     return onboardingId
   },
 
+  // An onboarding for someone joining, due the day after joining, with the
+  // checklist for their department. Returns its id.
+  onboarding_start: ({ p_employee_id: employeeId }) => {
+    const e = find('employees', employeeId)
+    if (!e) return null
+    const due = new Date(`${e.date_of_joining}T00:00:00`)
+    due.setDate(due.getDate() + 1)
+    const onboardingId = `new-${nextId++}`
+    rowsIn('onboardings').push(onboarding(onboardingId, String(employeeId),
+      `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`,
+      'in_progress', { created_by: authState.bound?.id, created_at: new Date().toISOString() }))
+    for (const s of rowsIn('onboarding_template_sections')
+      .filter((x) => x.department_id === null || x.department_id === e.department_id)) {
+      for (const t of rowsIn('onboarding_template_tasks').filter((x) => x.section_id === s.id)) {
+        rowsIn('onboarding_tasks').push({
+          ...onboardingTask(`new-${nextId++}`, onboardingId, String(s.name), Number(s.sort_order), String(t.title),
+            Number(t.sort_order), false, (s.department_id ?? null) as string | null),
+          template_task_id: t.id,
+        })
+      }
+    }
+    return onboardingId
+  },
+
   onboarding_task_set: ({ p_task_id: id, p_done: done }) => {
     const t = find('onboarding_tasks', id)
     if (t) Object.assign(t, { done_by: done ? authState.bound?.id : null, done_at: done ? new Date().toISOString() : null })
@@ -1381,6 +1440,13 @@ const RPCS: Record<string, (args: Row) => unknown> = {
       status: 'cancelled', cancelled_by: authState.bound?.id, cancelled_at: new Date().toISOString(), cancel_reason: reason,
     })
     return null
+  },
+
+  // Someone on notice, left or terminated: their date of separation as the
+  // last day, terminated as the reason if they were. Returns its id.
+  offboarding_start: ({ p_employee_id: employeeId }) => {
+    const e = find('employees', employeeId)
+    return e ? startOffboarding(e, e.status === 'terminated' ? { reason: 'terminated' } : {}) : null
   },
 
   offboarding_reorder_sections: ({ p_ids: ids }) => {

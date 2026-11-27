@@ -61,13 +61,16 @@ behaviour).
   only through `application_hire`; the test score and interview ratings
   are given only with `application_move`. Test files are attached and
   removed only through `application_add_test_file` / `_remove_test_file`.
-  Onboardings change only through
+  Onboardings are created only by `application_hire` and HR's
+  `onboarding_start` (someone joining, with none), and change only through
   `onboarding_task_set` / `_complete` / `_cancel`, and the checklist sync
   (`onboarding_sync` / `offboarding_sync`, run by triggers on checklist and
   department changes, in progress only); checklist order only
   through `onboarding_reorder_sections` / `_tasks`. Offboardings are started
-  and auto-cancelled only by the `employees_offboarding` trigger (status to /
-  from notice period) and change only through `offboarding_set_details` /
+  only by the `employees_offboarding` trigger (status to notice period) and
+  HR's `offboarding_start` (notice, left or terminated, none in progress or
+  completed since, never one's own), auto-cancelled only by the trigger (back
+  to working from notice, left or terminated), and change only through `offboarding_set_details` /
   `_task_set` / `_sign_off` / `_cancel`; the last sign-off is what marks the
   employee left. An appraisal's status moves only through
   `salary_revision_move`; clients write only a draft's month, figures and
@@ -209,7 +212,10 @@ behaviour).
   on edit, tabs *Details* and *Documents* (tab in `?tab=`; deleted documents
   behind *Show deleted*). Roles, and on edit the company email, are only sent
   by company admins, as is the sign-in method; delete and, for a password
-  login, *Set password* are company-admin only.
+  login, *Set password* are company-admin only. On edit, a card shows the
+  onboarding and latest offboarding (link, or start where the RPC allows);
+  creating someone joining offers the onboarding, and a status change to
+  notice / left / terminated with none offers the offboarding.
 - `/org-chart` — everyone. Reads `employee_directory`; HR can place, move and
   remove people.
 - `/performance` — everyone; tabs in `?tab=`: *Me* (own submitted reviews as
@@ -320,13 +326,16 @@ behaviour).
   hiring-team rules (mirrors of the SQL), board columns, hire error messages;
   default interview questions, which moves need scores, the score maths;
   test files: limits, when one is needed or kept, attach / remove.
-- `onboarding.ts` — onboarding selects (named employee FK), progress, overdue,
+- `onboarding.ts` — onboarding selects (named employee FK), who may start one
+  (mirror of `onboarding_start`), progress, overdue,
   grouping tasks by section (also offboarding's), who may tick a task (mirror
   of `can_tick_checklist_task`, both kinds), reorder helper, error messages.
 - `salary.ts` — appraisal totals, months, the salary in force (mirror of
   `salary_on`), active / upcoming / past, change %, error messages.
-- `offboarding.ts` — offboarding list select (names from the directory), the
-  sign-off state (mirror of `offboarding_sign_off`), error messages.
+- `offboarding.ts` — offboarding list select (names from the directory),
+  leaving / working statuses and who may start one (mirrors of
+  `employees_offboarding` / `offboarding_start`), the sign-off state (mirror
+  of `offboarding_sign_off`), error messages.
 - `payroll.ts` — payroll selects, the day the start nudge begins, which columns HR vs finance edit, client
   mirror of bonus / gross / net, totals, CSV building, file download, the
   payslip breakdown, error messages.
@@ -492,7 +501,8 @@ Full detail in `supabase/schema.sql`.
   per department); a person gets everyone's and their department's. HR reads, company admins write; `sort_order` set by trigger (last)
   and changed only by the reorder RPCs, which take every id.
 - `onboardings` (+ `onboarding_tasks`) — one per employee, created only by
-  `application_hire`; due the day after joining. Tasks link to their
+  `application_hire` or `onboarding_start` (HR, someone joining); due the day
+  after joining. Tasks link to their
   checklist task and keep its section's department; while in progress
   `onboarding_sync` keeps them in line with the checklist (adds, renames,
   order, removals; ticks kept). Status `in_progress` → `completed` /
@@ -505,7 +515,8 @@ Full detail in `supabase/schema.sql`.
   starter one).
 - `offboardings` (+ `offboarding_tasks`) — at most one in progress per
   employee (partial unique index), closed ones kept; started by
-  `employees_offboarding`; tasks kept in line with the checklist like
+  `employees_offboarding` or `offboarding_start` (HR; date of separation as
+  the last day, reason terminated for someone terminated); tasks kept in line with the checklist like
   onboarding's (`offboarding_sync`; a task added clears sign-offs). Reason
   and last working day set by HR. Tasks ticked by HR, or the org-chart
   manager for their own department's; sign-off (HR, and the
@@ -680,8 +691,9 @@ Full detail in `supabase/schema.sql`.
   triggers run `onboarding_sync` / `offboarding_sync` on those in progress.
 - Offboarding: HR sets status to notice period → `employees_offboarding`
   starts it (`offboarding_sync`) → HR sets details, HR and manager tick tasks →
-  `offboarding_sign_off` by each → completed, employee left. Status back to
-  probation / extended probation / active cancels it.
+  `offboarding_sign_off` by each → completed, employee left. HR may also
+  start one from the record (`offboarding_start`). Status back to probation /
+  extended probation / active, from notice, left or terminated, cancels it.
 - Peer reviews: `peer_cycle_create` (HR) → questions edited, assignments
   added → `peer_cycle_open` (answers made) → reviewers save and
   `peer_review_submit` → `peer_cycle_close` → subjects read
